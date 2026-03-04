@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
+import psycopg2
 from datetime import datetime, timedelta
 import plotly.express as px
 import io
 
-# --- 1. ESTÉTICA DE ALTO CONTRASTE (DISEÑO IPHONE/DARK) ---
+# --- 1. ESTÉTICA DE ALTO CONTRASTE ---
 st.set_page_config(page_title="GeZo Elite Pro", page_icon="💎", layout="wide")
 
 st.markdown("""
@@ -18,10 +18,6 @@ st.markdown("""
     .stButton>button {
         border-radius: 12px; background: linear-gradient(90deg, #00f2fe 0%, #4facfe 100%);
         color: black; font-weight: bold; height: 3.5em; width: 100%; border: none;
-    }
-    .whatsapp-btn {
-        background-color: #25d366; color: white; padding: 15px; text-align: center;
-        border-radius: 12px; text-decoration: none; display: block; font-weight: bold; margin-top: 20px;
     }
     .coach-box {
         background: rgba(255, 255, 255, 0.03); padding: 20px; border-radius: 15px;
@@ -38,30 +34,39 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. MOTOR DE DATOS (BASE DE DATOS INTEGRAL) ---
-conn = sqlite3.connect('gezo_master_ultimate.db', check_same_thread=False)
-c = conn.cursor()
+# --- 2. MOTOR DE DATOS (POSTGRESQL) ---
+def get_connection():
+    return psycopg2.connect(st.secrets["DB_URL"])
 
 def inicializar_db():
+    conn = get_connection()
+    c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS usuarios 
-                 (id INTEGER PRIMARY KEY, nombre TEXT, clave TEXT, expira TEXT, rol TEXT, 
-                  plan TEXT, presupuesto REAL DEFAULT 250000)''')
+                 (id SERIAL PRIMARY KEY, nombre TEXT, clave TEXT, expira DATE, rol TEXT, 
+                  plan TEXT, presupuesto DECIMAL DEFAULT 250000)''')
     c.execute('''CREATE TABLE IF NOT EXISTS movimientos 
-                 (id INTEGER PRIMARY KEY, usuario_id INTEGER, fecha TEXT, desc TEXT, monto REAL, tipo TEXT, cat TEXT)''')
+                 (id SERIAL PRIMARY KEY, usuario_id INTEGER, fecha DATE, descrip TEXT, monto DECIMAL, tipo TEXT, cat TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS metas 
-                 (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre TEXT, objetivo REAL, actual REAL)''')
+                 (id SERIAL PRIMARY KEY, usuario_id INTEGER, nombre TEXT, objetivo DECIMAL, actual DECIMAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS deudas 
-                 (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre TEXT, monto_total REAL, pagado REAL DEFAULT 0, tipo TEXT)''')
+                 (id SERIAL PRIMARY KEY, usuario_id INTEGER, nombre TEXT, monto_total DECIMAL, pagado DECIMAL DEFAULT 0, tipo TEXT)''')
     
     c.execute("SELECT * FROM usuarios WHERE nombre='admin'")
     if not c.fetchone():
-        c.execute("INSERT INTO usuarios (nombre, clave, expira, rol, plan) VALUES (?,?,?,?,?)", 
+        c.execute("INSERT INTO usuarios (nombre, clave, expira, rol, plan) VALUES (%s, %s, %s, %s, %s)", 
                   ('admin', 'admin123', '2099-12-31', 'admin', 'Dueño Master'))
     conn.commit()
+    c.close()
+    conn.close()
 
-inicializar_db()
+# Ejecutar inicialización al arranque
+try:
+    inicializar_db()
+except Exception as e:
+    st.error(f"Error de conexión a la base de datos: {e}")
+    st.stop()
 
-# --- 3. LOGICA DE SEGURIDAD Y TIPO DE CAMBIO ---
+# --- 3. SEGURIDAD Y SESIÓN ---
 WHATSAPP_NUM = "50663712477"
 TC_DOLAR = 518.00 
 
@@ -74,174 +79,166 @@ if not st.session_state.autenticado:
         u = st.text_input("Usuario")
         p = st.text_input("Contraseña", type="password")
         if st.form_submit_button("INGRESAR"):
-            c.execute("SELECT id, nombre, rol, presupuesto, plan, expira FROM usuarios WHERE nombre=? AND clave=?", (u, p))
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("SELECT id, nombre, rol, presupuesto, plan, expira FROM usuarios WHERE nombre=%s AND clave=%s", (u, p))
             res = c.fetchone()
             if res:
-                venc = datetime.strptime(res[5], "%Y-%m-%d").date()
+                venc = res[5]
                 if datetime.now().date() > venc:
                     st.error("Suscripción vencida.")
-                    st.markdown(f'<a href="https://wa.me/{WHATSAPP_NUM}?text=Renovar cuenta: {u}" class="whatsapp-btn">📲 Contactar Soporte</a>', unsafe_allow_html=True)
+                    st.markdown(f'<a href="https://wa.me/{WHATSAPP_NUM}" target="_blank" class="whatsapp-btn">📲 Contactar para Renovar</a>', unsafe_allow_html=True)
                 else:
                     st.session_state.update({"autenticado":True, "uid":res[0], "uname":res[1], "rol":res[2], "pres":res[3], "plan":res[4]})
                     st.rerun()
             else: st.error("Credenciales incorrectas.")
+            c.close()
+            conn.close()
     st.stop()
 
-def fmt(n): return f"₡{n:,.0f}" if st.session_state.ver_montos else "₡ *.*"
+def fmt(n): return f"₡{float(n):,.0f}" if st.session_state.ver_montos else "₡ *.*"
 
 # --- 4. NAVEGACIÓN ---
 with st.sidebar:
     st.title(f"👑 {st.session_state.uname}")
     st.markdown(f'<span class="status-tag">{st.session_state.plan}</span>', unsafe_allow_html=True)
-    if st.button("👁️ Modo Privacidad"):
+    if st.button("👁️ Privacidad"):
         st.session_state.ver_montos = not st.session_state.ver_montos
         st.rerun()
-    menu = st.radio("Menú Principal", ["📊 Dashboard IA", "📱 SINPE Rápido", "💸 Registrar", "🤝 Deudas y Cobros", "💱 Conversor", "🎯 Metas", "⚙️ Admin"])
+    menu = st.radio("Secciones", ["📊 Dashboard IA", "📱 SINPE Rápido", "💸 Registrar", "🤝 Deudas y Cobros", "💱 Conversor", "🎯 Metas", "⚙️ Admin"])
     st.markdown("---")
     if st.button("Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
 
-# --- 5. MÓDULOS DEL SISTEMA ---
+# --- 5. MÓDULOS ---
 
-# --- DASHBOARD IA + FONDO EMERGENCIA + EXPORTAR ---
 if menu == "📊 Dashboard IA":
-    st.header("Salud Financiera GeZo")
+    st.header("Análisis GeZo IA")
+    st.markdown('<div class="emergencia-box">🛡️ RETO: Fondo de Emergencia ₡500,000</div>', unsafe_allow_html=True)
     
-    st.markdown("""
-        <div class="emergencia-box">
-            <span style='color:#ff007f; font-weight:bold;'>🛡️ RETO DE SEGURIDAD:</span> 
-            Tu meta actual es un <b>Fondo de Emergencia de ₡500,000</b>. ¡No lo toques a menos que sea una urgencia real!
-        </div>
-    """, unsafe_allow_html=True)
-
-    df = pd.read_sql(f"SELECT * FROM movimientos WHERE usuario_id={st.session_state.uid}", conn)
+    df = pd.read_sql(f"SELECT * FROM movimientos WHERE usuario_id={st.session_state.uid}", get_connection())
     ing = df[df['tipo']=='Ingreso']['monto'].sum() if not df.empty else 0
     gas = df[df['tipo']=='Gasto']['monto'].sum() if not df.empty else 0
-    balance = ing - gas
+    balance = float(ing) - float(gas)
     
     c1, c2, c3 = st.columns(3)
     c1.metric("Ingresos", fmt(ing))
     c2.metric("Gastos", fmt(gas), delta_color="inverse")
-    c3.metric("Saldo Disponible", fmt(balance))
+    c3.metric("Saldo Real", fmt(balance))
 
     st.markdown('<div class="coach-box">', unsafe_allow_html=True)
-    st.subheader("🤖 Coach IA GeZo")
+    st.subheader("🤖 Recomendaciones")
     if balance < 0:
-        st.error(f"⚠️ *Números Rojos:* Estás gastando {fmt(abs(balance))} más de lo que ganas. Revisa la categoría '⚖️ Pensión' o '📱 SINPE'.")
-    elif balance > 0 and balance < (st.session_state.pres * 0.1):
-        st.warning("🧐 *Margen Crítico:* Tu saldo libre es poco. Evita compras fuera de presupuesto.")
+        st.error(f"⚠️ Revisa tus gastos en '⚖️ Pensión' o '📱 SINPE'. Estás en números rojos.")
     else:
-        st.success("💎 *Balance Elite:* ¡Excelente! Tienes un buen margen. ¿Ya abonaste a tu Meta?")
+        st.success("💎 Balance saludable. ¡No olvides abonar a tus metas!")
     st.markdown('</div>', unsafe_allow_html=True)
 
     if not df.empty:
-        # Botón de exportar a Excel (CSV)
         csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Descargar Movimientos (Excel/CSV)", csv, "Mis_Finanzas_GeZo.csv", "text/csv")
-        
-        fig = px.pie(df[df['tipo']=='Gasto'], values='monto', names='cat', hole=.4, template="plotly_dark", title="¿En qué gastas?")
+        st.download_button("📥 Descargar Excel (CSV)", csv, "Reporte_GeZo.csv", "text/csv")
+        fig = px.pie(df[df['tipo']=='Gasto'], values='monto', names='cat', hole=.4, template="plotly_dark")
         st.plotly_chart(fig, use_container_width=True)
 
-# --- SINPE RÁPIDO ---
 elif menu == "📱 SINPE Rápido":
-    st.header("📱 SINPE Móvil y Registro")
-    st.info("Primero registra el envío aquí para que no se te olvide, luego abre tu banco.")
-    with st.form("sinpe_form"):
-        tel = st.text_input("Número de Destino (8 dígitos)", placeholder="88887777")
-        mon_s = st.number_input("Monto del envío (₡)", min_value=0)
-        det_s = st.text_input("¿Para qué es?", placeholder="Pago almuerzo, feria, etc.")
-        banc = st.selectbox("Abrir Aplicación de:", ["BNCR", "BAC", "BCR", "BP", "Promerica"])
-        if st.form_submit_button("REGISTRAR Y IR AL BANCO"):
-            if len(tel) == 8:
-                c.execute("INSERT INTO movimientos (usuario_id, fecha, desc, monto, tipo, cat) VALUES (?,?,?,?,?,?)",
-                          (st.session_state.uid, datetime.now().strftime("%Y-%m-%d"), f"SINPE a {tel}: {det_s}", mon_s, "Gasto", "📱 SINPE"))
+    st.header("Envío y Registro SINPE")
+    with st.form("sinpe_f"):
+        num = st.text_input("Número (8 dígitos)")
+        mon = st.number_input("Monto (₡)", min_value=0)
+        det = st.text_input("Detalle")
+        ban = st.selectbox("Abrir Banco:", ["BNCR", "BAC", "BCR", "BP"])
+        if st.form_submit_button("REGISTRAR Y ABRIR APP"):
+            if len(num) == 8:
+                conn = get_connection()
+                c = conn.cursor()
+                c.execute("INSERT INTO movimientos (usuario_id, fecha, descrip, monto, tipo, cat) VALUES (%s,%s,%s,%s,%s,%s)",
+                          (st.session_state.uid, datetime.now().date(), f"SINPE a {num}: {det}", mon, "Gasto", "📱 SINPE"))
                 conn.commit()
-                st.success("✅ Gasto anotado en tu historial.")
+                c.close()
+                conn.close()
                 links = {"BNCR": "https://www.bnmovil.fi.cr/", "BAC": "https://www.baccredomatic.com/", "BCR": "https://www.bancobcr.com/", "BP": "https://www.bancopopular.fi.cr/"}
-                st.markdown(f'<a href="{links.get(banc, "https://google.com")}" target="_blank" class="whatsapp-btn">🚀 Abrir App de {banc} Ahora</a>', unsafe_allow_html=True)
-            else: st.error("Número inválido.")
+                st.markdown(f'<a href="{links.get(ban)}" target="_blank" class="whatsapp-btn">🚀 Ir a {ban}</a>', unsafe_allow_html=True)
 
-# --- REGISTRO MANUAL ---
 elif menu == "💸 Registrar":
-    st.header("Nuevo Movimiento Manual")
+    st.header("Registro Manual")
     with st.form("reg_m"):
         desc = st.text_input("Descripción")
-        mont = st.number_input("Monto", min_value=0.0)
-        moneda = st.radio("Moneda", ["₡ Colones", "$ Dólares"], horizontal=True)
-        cate = st.selectbox("Categoría", ["⚖️ Pensión", "⛽ Gasolina", "🛒 Súper", "🍱 Salidas", "🏠 Casa", "⚡ Servicios", "📱 SINPE", "🎬 Suscripciones", "💡 Gastos Hormiga", "🏦 Deudas", "💰 Ahorro", "💵 Salario", "📦 Otros"])
+        monto = st.number_input("Monto", min_value=0.0)
+        cat = st.selectbox("Categoría", ["⚖️ Pensión", "⛽ Gasolina", "🛒 Súper", "🏠 Casa", "⚡ Servicios", "📱 SINPE", "🎬 Suscripciones", "💡 Gastos Hormiga", "🏦 Deudas", "💰 Ahorro", "💵 Salario", "📦 Otros"])
         tipo = st.selectbox("Tipo", ["Gasto", "Ingreso"])
-        if st.form_submit_button("GUARDAR EN NUBE"):
-            f_mont = mont if "₡" in moneda else mont * TC_DOLAR
-            c.execute("INSERT INTO movimientos (usuario_id, fecha, desc, monto, tipo, cat) VALUES (?,?,?,?,?,?)",
-                      (st.session_state.uid, datetime.now().strftime("%Y-%m-%d"), desc, f_mont, tipo, cate))
+        if st.form_submit_button("GUARDAR"):
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("INSERT INTO movimientos (usuario_id, fecha, descrip, monto, tipo, cat) VALUES (%s,%s,%s,%s,%s,%s)",
+                      (st.session_state.uid, datetime.now().date(), desc, monto, tipo, cat))
             conn.commit()
-            st.success("¡Guardado!")
+            c.close()
+            conn.close()
+            st.success("¡Registro exitoso!")
 
-# --- DEUDAS CON ABONO AUTOMÁTICO ---
 elif menu == "🤝 Deudas y Cobros":
-    st.header("Préstamos y Deudas")
+    st.header("Préstamos")
     t1, t2 = st.tabs(["➕ Nueva", "📋 Gestión"])
     with t1:
-        with st.form("deu_n"):
-            p_nom = st.text_input("Nombre de la Persona")
-            p_tot = st.number_input("Monto Total", min_value=0.0)
-            p_tip = st.selectbox("Relación", ["Me deben (Cobro)", "Yo debo (Deuda)"])
-            if st.form_submit_button("REGISTRAR"):
-                c.execute("INSERT INTO deudas (usuario_id, nombre, monto_total, pagado, tipo) VALUES (?,?,?,?,?)", (st.session_state.uid, p_nom, p_tot, 0, p_tip))
+        with st.form("d_n"):
+            p_n = st.text_input("Nombre")
+            p_m = st.number_input("Monto Total", min_value=0.0)
+            p_t = st.selectbox("Tipo", ["Me deben", "Yo debo"])
+            if st.form_submit_button("CREAR"):
+                conn = get_connection()
+                c = conn.cursor()
+                c.execute("INSERT INTO deudas (usuario_id, nombre, monto_total, pagado, tipo) VALUES (%s,%s,%s,%s,%s)", (st.session_state.uid, p_n, p_m, 0, p_t))
                 conn.commit()
+                c.close()
+                conn.close()
                 st.rerun()
     with t2:
-        deudas = pd.read_sql(f"SELECT * FROM deudas WHERE usuario_id={st.session_state.uid}", conn)
+        deudas = pd.read_sql(f"SELECT * FROM deudas WHERE usuario_id={st.session_state.uid}", get_connection())
         for i, r in deudas.iterrows():
-            falta = r['monto_total'] - r['pagado']
+            falta = float(r['monto_total']) - float(r['pagado'])
             st.write(f"*{r['nombre']}* | Resta: {fmt(falta)}")
             if falta > 0:
-                with st.expander("Registrar Abono"):
-                    abo = st.number_input("Monto Abono", min_value=0.0, key=f"abo_{r['id']}")
-                    if st.button("Abonar", key=f"btn_{r['id']}"):
-                        c.execute("UPDATE deudas SET pagado = pagado + ? WHERE id = ?", (abo, r['id']))
-                        # Vinculación automática a movimientos
-                        tipo_mov = "Ingreso" if "Me deben" in r['tipo'] else "Gasto"
-                        c.execute("INSERT INTO movimientos (usuario_id, fecha, desc, monto, tipo, cat) VALUES (?,?,?,?,?,?)",
-                                  (st.session_state.uid, datetime.now().strftime("%Y-%m-%d"), f"Abono de/a {r['nombre']}", abo, tipo_mov, "🤝 Deudas/Cobros"))
+                with st.expander("Abonar"):
+                    ab = st.number_input("Monto Abono", min_value=0.0, key=f"ab_{r['id']}")
+                    if st.button("Confirmar Abono", key=f"bt_{r['id']}"):
+                        conn = get_connection()
+                        c = conn.cursor()
+                        c.execute("UPDATE deudas SET pagado = pagado + %s WHERE id = %s", (ab, r['id']))
+                        t_mov = "Ingreso" if r['tipo'] == "Me deben" else "Gasto"
+                        c.execute("INSERT INTO movimientos (usuario_id, fecha, descrip, monto, tipo, cat) VALUES (%s,%s,%s,%s,%s,%s)",
+                                  (st.session_state.uid, datetime.now().date(), f"Abono {r['nombre']}", ab, t_mov, "🤝 Deudas/Cobros"))
                         conn.commit()
+                        c.close()
+                        conn.close()
                         st.rerun()
 
-# --- CONVERSOR ---
 elif menu == "💱 Conversor":
-    st.header("Calculadora CRC / USD")
-    v_c = st.number_input("Cantidad", min_value=0.0)
-    st.write(f"En colones: *₡{v_c * TC_DOLAR:,.2f}*")
-    st.write(f"En dólares: *${v_c / TC_DOLAR:,.2f}*")
+    st.header("Calculadora ₡/$")
+    v = st.number_input("Monto", min_value=0.0)
+    st.write(f"En colones: *₡{v * TC_DOLAR:,.2f}* | En dólares: *${v / TC_DOLAR:,.2f}*")
 
-# --- METAS ---
 elif menu == "🎯 Metas":
-    st.header("Metas de Ahorro")
-    with st.expander("Nueva Meta"):
-        m_n = st.text_input("¿Qué quieres comprar?")
-        m_o = st.number_input("Monto Objetivo", min_value=0.0)
-        if st.button("Crear Meta"):
-            c.execute("INSERT INTO metas (usuario_id, nombre, objetivo, actual) VALUES (?,?,?,?)", (st.session_state.uid, m_n, m_o, 0))
-            conn.commit()
-            st.rerun()
-    metas = pd.read_sql(f"SELECT * FROM metas WHERE usuario_id={st.session_state.uid}", conn)
+    st.header("Ahorros")
+    metas = pd.read_sql(f"SELECT * FROM metas WHERE usuario_id={st.session_state.uid}", get_connection())
     for i, r in metas.iterrows():
         st.write(f"*{r['nombre']}*")
-        st.progress(r['actual']/r['objetivo'] if r['objetivo'] > 0 else 0)
+        st.progress(float(r['actual'])/float(r['objetivo']) if float(r['objetivo']) > 0 else 0)
 
-# --- ADMIN ---
 elif menu == "⚙️ Admin":
     if st.session_state.rol == 'admin':
-        st.header("Panel de Administración Master")
-        with st.form("admin_u"):
+        st.header("Control Maestro")
+        with st.form("adm"):
             nu, nc = st.text_input("Usuario"), st.text_input("Clave")
-            np = st.number_input("Presupuesto Sugerido", value=250000)
-            nplan = st.selectbox("Plan", ["Prueba (7d)", "Mensual", "Anual", "Eterno"])
-            dias = 7 if "Prueba" in nplan else 30 if "Mensual" in nplan else 365 if "Anual" in nplan else 36500
-            if st.form_submit_button("CREAR CLIENTE"):
-                v_f = (datetime.now() + timedelta(days=dias)).strftime("%Y-%m-%d")
-                c.execute("INSERT INTO usuarios (nombre, clave, expira, rol, plan, presupuesto) VALUES (?,?,?,?,?,?)", (nu, nc, v_f, 'usuario', nplan, np))
+            np = st.selectbox("Plan", ["Prueba", "Mensual", "Anual"])
+            dias = 7 if "Prueba" in np else 30 if "Mensual" in np else 365
+            if st.form_submit_button("CREAR USUARIO"):
+                vf = (datetime.now() + timedelta(days=dias)).date()
+                conn = get_connection()
+                c = conn.cursor()
+                c.execute("INSERT INTO usuarios (nombre, clave, expira, rol, plan) VALUES (%s,%s,%s,%s,%s)", (nu, nc, vf, 'usuario', np))
                 conn.commit()
+                c.close()
+                conn.close()
                 st.success(f"Usuario {nu} creado.")
-        st.table(pd.read_sql("SELECT nombre, plan, expira FROM usuarios WHERE rol!='admin'", conn))
+        st.table(pd.read_sql("SELECT nombre, plan, expira FROM usuarios WHERE rol!='admin'", get_connection()))
