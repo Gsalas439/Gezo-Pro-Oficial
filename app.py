@@ -3,12 +3,11 @@ import pandas as pd
 import sqlite3
 from datetime import datetime, timedelta
 import plotly.express as px
-import plotly.graph_objects as go
 
 # --- 1. CONFIGURACIÓN DE ALTO NIVEL ---
 st.set_page_config(page_title="GeZo Elite Pro", page_icon="💎", layout="wide")
 
-# Diseño "Premium Glass" y Optimización Móvil
+# Diseño Premium "Glassmorphism" optimizado para iPhone
 st.markdown("""
     <style>
     .main { background-color: #0e1117; color: white; }
@@ -23,118 +22,132 @@ st.markdown("""
         border-radius: 12px;
         background: linear-gradient(90deg, #00c6ff 0%, #0072ff 100%);
         color: white; font-weight: bold; border: none; height: 3.5em;
+        width: 100%;
     }
     .prediction-box {
         background: rgba(255, 165, 0, 0.1);
         padding: 15px; border-radius: 12px; border-left: 5px solid orange; margin: 10px 0;
     }
+    .stTextInput>div>div>input { color: white; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. MOTOR DE DATOS ---
-conn = sqlite3.connect('gezo_ultimate.db', check_same_thread=False)
+# --- 2. MOTOR DE DATOS & AUTO-ADMIN ---
+conn = sqlite3.connect('gezo_ultimate_v2.db', check_same_thread=False)
 c = conn.cursor()
-c.execute('CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre TEXT, clave TEXT, expira TEXT, rol TEXT, presupuesto REAL DEFAULT 250000)')
-c.execute('CREATE TABLE IF NOT EXISTS movimientos (id INTEGER PRIMARY KEY, usuario_id INTEGER, fecha TEXT, desc TEXT, monto REAL, tipo TEXT, cat TEXT)')
-c.execute('CREATE TABLE IF NOT EXISTS metas (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre TEXT, objetivo REAL, actual REAL)')
-conn.commit()
 
-# --- 3. LOGICA INTELIGENTE ---
-def obtener_tc(): return {"venta": 518.00} # Simulación BCCR
+def inicializar_db():
+    c.execute('''CREATE TABLE IF NOT EXISTS usuarios 
+                 (id INTEGER PRIMARY KEY, nombre TEXT, clave TEXT, expira TEXT, rol TEXT, presupuesto REAL DEFAULT 250000)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS movimientos 
+                 (id INTEGER PRIMARY KEY, usuario_id INTEGER, fecha TEXT, desc TEXT, monto REAL, tipo TEXT, cat TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS metas 
+                 (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre TEXT, objetivo REAL, actual REAL)''')
+    
+    # Crear admin por defecto si la base es nueva
+    c.execute("SELECT * FROM usuarios WHERE nombre='admin'")
+    if not c.fetchone():
+        c.execute("INSERT INTO usuarios (nombre, clave, expira, rol) VALUES (?,?,?,?)", 
+                  ('admin', 'admin123', '2099-12-31', 'admin'))
+    conn.commit()
 
-if 'autenticado' not in st.session_state: st.session_state.autenticado = False
-if 'ver_montos' not in st.session_state: st.session_state.ver_montos = True
+inicializar_db()
 
-# --- 4. ACCESO ---
+# --- 3. LÓGICA DE SESIÓN ---
+if 'autenticado' not in st.session_state:
+    st.session_state.autenticado = False
+if 'ver_montos' not in st.session_state:
+    st.session_state.ver_montos = True
+
+# --- 4. PANTALLA DE LOGIN ---
 if not st.session_state.autenticado:
     st.title("💎 GeZo Elite Pro")
-    st.subheader("La evolución de tus finanzas")
-    with st.form("login"):
+    st.subheader("Bienvenido al control total de tus finanzas")
+    
+    with st.form("login_form"):
         u = st.text_input("Usuario")
         p = st.text_input("Contraseña", type="password")
-        if st.form_submit_button("INICIAR SESIÓN ELITE"):
+        btn = st.form_submit_button("INICIAR SESIÓN")
+        
+        if btn:
             c.execute("SELECT id, nombre, rol, presupuesto FROM usuarios WHERE nombre=? AND clave=?", (u, p))
             res = c.fetchone()
             if res:
                 st.session_state.update({"autenticado":True, "uid":res[0], "uname":res[1], "rol":res[2], "pres":res[3]})
                 st.rerun()
+            else:
+                st.error("Credenciales incorrectas")
     st.stop()
 
-# --- 5. PANEL DE CONTROL (SIDEBAR) ---
-tc = obtener_tc()
+# --- 5. PANEL PRINCIPAL (SIDEBAR) ---
+tc_venta = 518.00 # Dólar BCCR aproximado
+
 with st.sidebar:
     st.title(f"👑 {st.session_state.uname}")
-    st.button("👁️ Privacidad", on_click=lambda: st.session_state.update({"ver_montos": not st.session_state.ver_montos}))
-    menu = st.radio("Navegación", ["📊 Dashboard IA", "💸 Registro Rápido", "🎯 Metas Ahorro", "⚙️ Ajustes"])
-    st.markdown(f"--- \n *Dólar:* ₡{tc['venta']}")
+    if st.button("👁️ Privacidad (Ocultar/Ver)"):
+        st.session_state.ver_montos = not st.session_state.ver_montos
+        st.rerun()
+    
+    menu = st.radio("Menú", ["📊 Dashboard IA", "💸 Registrar", "🎯 Metas", "⚙️ Admin"])
+    st.markdown(f"--- \n *Tipo de Cambio:* ₡{tc_venta}")
+    
     if st.button("Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
 
-# --- MÓDULO DASHBOARD CON IA ---
+# --- 6. MÓDULOS DE LA APP ---
+
+# --- DASHBOARD IA ---
 if menu == "📊 Dashboard IA":
-    st.header("Análisis Predictivo")
+    st.header("Análisis Inteligente")
     
     df = pd.read_sql(f"SELECT * FROM movimientos WHERE usuario_id={st.session_state.uid}", conn)
     ing = df[df['tipo']=='Ingreso']['monto'].sum() if not df.empty else 0
     gas = df[df['tipo']=='Gasto']['monto'].sum() if not df.empty else 0
     bal = ing - gas
     
-    # Métrica de Privacidad
-    m_ing = f"₡{ing:,.0f}" if st.session_state.ver_montos else "₡ *"
-    m_gas = f"₡{gas:,.0f}" if st.session_state.ver_montos else "₡ *"
-    m_bal = f"₡{bal:,.0f}" if st.session_state.ver_montos else "₡ *"
+    # Formato de privacidad
+    def fmt(n): return f"₡{n:,.0f}" if st.session_state.ver_montos else "₡ *.*"
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Ingresos", m_ing)
-    c2.metric("Gastos", m_gas, delta="-Presupuesto", delta_color="inverse")
-    c3.metric("Saldo Real", m_bal)
+    c1.metric("Ingresos", fmt(ing))
+    c2.metric("Gastos", fmt(gas), delta="-Consumo", delta_color="inverse")
+    c3.metric("Saldo Real", fmt(bal))
 
-    # --- PREDICCIÓN INTELIGENTE ---
+    # Predicción automática
     if gas > 0:
-        dias_mes = 30
         dia_actual = datetime.now().day
-        gasto_diario = gas / dia_actual
-        proyeccion = gasto_diario * dias_mes
-        
-        st.markdown(f'<div class="prediction-box">🤖 <b>Predicción GeZo:</b> Al ritmo actual, terminarás el mes gastando <b>₡{proyeccion:,.0f}</b>.</div>', unsafe_allow_html=True)
-        if proyeccion > st.session_state.pres:
-            st.error(f"⚠️ ¡Cuidado! Superarás tu presupuesto por ₡{proyeccion - st.session_state.pres:,.0f}")
+        proyeccion = (gas / dia_actual) * 30
+        st.markdown(f'<div class="prediction-box">🤖 <b>Proyección GeZo:</b> Al ritmo actual, cerrarás el mes con un gasto de <b>{fmt(proyeccion)}</b>.</div>', unsafe_allow_html=True)
 
-    # Gráfico de Gastos
     if not df.empty and gas > 0:
-        fig = px.bar(df[df['tipo']=='Gasto'], x='cat', y='monto', color='cat', title="Gastos por Categoría", template="plotly_dark")
+        fig = px.pie(df[df['tipo']=='Gasto'], values='monto', names='cat', hole=.4, template="plotly_dark", title="¿En qué se va el dinero?")
         st.plotly_chart(fig, use_container_width=True)
 
-# --- MÓDULO REGISTRO RÁPIDO (TIPO IPHONE) ---
-elif menu == "💸 Registro Rápido":
+# --- REGISTRAR ---
+elif menu == "💸 Registrar":
     st.header("Nuevo Movimiento")
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.button("📱 SINPE Rápido", on_click=lambda: st.toast("Modo SINPE Activo"))
-    
     with st.form("reg"):
-        desc = st.text_input("¿En qué gastaste?")
-        monto = st.number_input("Monto (₡)", min_value=0)
-        moneda = st.radio("Moneda", ["₡ Colones", "$ Dólares"], horizontal=True)
-        cat = st.selectbox("Categoría", ["Comida", "Super", "Sinpe", "Ocio", "Transporte", "Casa", "Salario"])
+        desc = st.text_input("Detalle (Ej: Supermercado)")
+        monto = st.number_input("Monto", min_value=0.0)
+        moneda = st.radio("Moneda", ["CRC (₡)", "USD ($)"], horizontal=True)
+        cat = st.selectbox("Categoría", ["Comida", "Transporte", "Casa", "Sinpe", "Ocio", "Salario", "Otros"])
         tipo = st.selectbox("Tipo", ["Gasto", "Ingreso"])
         
-        if st.form_submit_button("REGISTRAR AHORA"):
-            monto_final = monto if "₡" in moneda else monto * tc['venta']
+        if st.form_submit_button("GUARDAR EN NUBE"):
+            monto_final = monto if "CRC" in moneda else monto * tc_venta
             c.execute("INSERT INTO movimientos (usuario_id, fecha, desc, monto, tipo, cat) VALUES (?,?,?,?,?,?)",
                       (st.session_state.uid, datetime.now().strftime("%Y-%m-%d"), desc, monto_final, tipo, cat))
             conn.commit()
-            st.balloons()
-            st.success("Guardado en la nube ☁️")
+            st.success("¡Registrado exitosamente!")
 
-# --- MÓDULO METAS DE AHORRO ---
-elif menu == "🎯 Metas Ahorro":
-    st.header("Tus Metas")
-    with st.expander("Añadir Nueva Meta"):
-        n_meta = st.text_input("Nombre de la meta (ej. Marchamo)")
-        obj_meta = st.number_input("Monto Objetivo (₡)", min_value=0)
-        if st.button("Crear Meta"):
+# --- METAS ---
+elif menu == "🎯 Metas":
+    st.header("Metas de Ahorro")
+    with st.expander("Crear Nueva Meta"):
+        n_meta = st.text_input("Nombre de la meta")
+        obj_meta = st.number_input("Monto Objetivo", min_value=0)
+        if st.button("Añadir"):
             c.execute("INSERT INTO metas (usuario_id, nombre, objetivo, actual) VALUES (?,?,?,?)", (st.session_state.uid, n_meta, obj_meta, 0))
             conn.commit()
             st.rerun()
@@ -144,16 +157,19 @@ elif menu == "🎯 Metas Ahorro":
         st.write(f"*{r['nombre']}*")
         prog = (r['actual'] / r['objetivo']) if r['objetivo'] > 0 else 0
         st.progress(prog)
-        st.write(f"₡{r['actual']:,.0f} de ₡{r['objetivo']:,.0f} ({prog*100:.1f}%)")
+        st.caption(f"{fmt(r['actual'])} de {fmt(r['objetivo'])}")
 
-# --- MÓDULO ADMIN ---
-elif menu == "⚙️ Ajustes" and st.session_state.rol == 'admin':
-    st.header("Admin: Gestión de Usuarios")
-    nu = st.text_input("Nombre Usuario")
-    np = st.text_input("Contraseña")
-    pres_u = st.number_input("Presupuesto Mensual", value=250000)
-    if st.button("CREAR USUARIO PRO"):
-        fv = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
-        c.execute("INSERT INTO usuarios (nombre, clave, expira, rol, presupuesto) VALUES (?,?,?,?,?)", (nu, np, fv, 'usuario', pres_u))
-        conn.commit()
-        st.success("Usuario creado con éxito")
+# --- ADMIN ---
+elif menu == "⚙️ Admin":
+    if st.session_state.rol == 'admin':
+        st.header("Panel de Control")
+        with st.form("nuevo_u"):
+            nu = st.text_input("Usuario Nuevo")
+            np = st.text_input("Clave")
+            if st.form_submit_button("Crear Usuario"):
+                fv = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+                c.execute("INSERT INTO usuarios (nombre, clave, expira, rol) VALUES (?,?,?,?)", (nu, np, fv, 'usuario'))
+                conn.commit()
+                st.success(f"Usuario {nu} creado.")
+    else:
+        st.error("Acceso denegado.")
