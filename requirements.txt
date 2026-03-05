@@ -1,6 +1,6 @@
 streamlit
 pandas
 plotly
-requests
 psycopg2-binary
 fpdf
+requests
