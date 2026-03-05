@@ -26,10 +26,10 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. BASE DE DATOS Y ARQUITECTURA ERP ---
+# --- 2. BASE DE DATOS Y ARQUITECTURA ERP (BLINDADA) ---
 def get_connection():
     try: return psycopg2.connect(st.secrets["DB_URL"])
-    except: st.error("Reconectando a la Base de Datos..."); return psycopg2.connect(st.secrets["DB_URL"])
+    except Exception as e: st.error("Conectando con Servidor Seguro..."); return psycopg2.connect(st.secrets["DB_URL"])
 
 def inicializar_db():
     conn = get_connection(); c = conn.cursor()
@@ -76,7 +76,11 @@ def procesar_suscripciones_pendientes():
     suscripciones = c.fetchall()
     for sub in suscripciones:
         sub_id, nombre, monto, dia_cobro, cat, moneda = sub
-        if hoy.day >= dia_cobro:
+        # Lógica inteligente para fin de mes (ej. febrero 28)
+        ultimo_dia_mes = (hoy.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        dia_efectivo = min(dia_cobro, ultimo_dia_mes.day)
+        
+        if hoy.day >= dia_efectivo:
             c.execute("SELECT id FROM historial_suscripciones WHERE suscripcion_id=%s AND mes_anio=%s", (sub_id, mes_actual))
             if not c.fetchone():
                 c.execute("INSERT INTO movimientos (usuario_id, fecha, descrip, monto, tipo, cat, moneda) VALUES (%s,%s,%s,%s,%s,%s,%s)", 
@@ -115,15 +119,15 @@ if not st.session_state.autenticado:
                 else: st.error("Credenciales incorrectas.")
     st.stop()
 
-# Auto-cobro al iniciar sesión
+# Procesar cobros automáticos (Motor Fantasma)
 procesar_suscripciones_pendientes()
 
 # --- 4. NAVEGACIÓN COMPLETA ERP ---
 st.markdown(f"### 👑 **{st.session_state.uname}** | ERP System")
 
-# Alertas Proactivas
+# Alertas Proactivas Blindadas
 conn = get_connection()
-df_alertas = pd.read_sql(f"SELECT nombre, fecha_vence, monto_total, pagado, moneda FROM deudas WHERE usuario_id={st.session_state.uid} AND tipo_registro='DEUDA' AND pagado < monto_total", conn)
+df_alertas = pd.read_sql("SELECT nombre, fecha_vence, monto_total, pagado, moneda FROM deudas WHERE usuario_id=%s AND tipo_registro='DEUDA' AND pagado < monto_total", conn, params=(st.session_state.uid,))
 conn.close()
 if not df_alertas.empty:
     for _, r in df_alertas.iterrows():
@@ -131,7 +135,7 @@ if not df_alertas.empty:
         if 0 <= dias <= 2: st.markdown(f'<div class="alert-box">⚠️ ALERTA: Tu obligación con **{r["nombre"]}** vence en {dias} días.</div>', unsafe_allow_html=True)
         elif dias < 0: st.markdown(f'<div class="alert-box" style="background: rgba(200,0,0,0.2);">🚨 VENCIDA: Atraso de {abs(dias)} días con **{r["nombre"]}**.</div>', unsafe_allow_html=True)
 
-t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(["📊 DASHBOARD", "💸 REGISTRO", "💼 BILLETERAS & PROYECTOS", "🚧 FIJOS & PRESUPUESTOS", "🎯 METAS", "🏦 DEUDAS", "📱 SINPE", "📜 HISTORIAL Y AJUSTES"])
+t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(["📊 DASHBOARD", "💸 REGISTRO", "💼 BILLETERAS & PROY", "🚧 FIJOS & PRES", "🎯 METAS", "🏦 DEUDAS", "📱 SINPE", "📜 HISTORIAL Y AJUSTES"])
 
 # --- T1: DASHBOARD & RENTABILIDAD ---
 with t1:
@@ -140,13 +144,13 @@ with t1:
     cb2.markdown(f'<div class="bac-card"><small>BAC VENTA (USD)</small><br>₡{TIPO_CAMBIO_VENTA}</div>', unsafe_allow_html=True)
     
     st.divider()
-    rango = st.radio("Filtro:", ["Mes Actual", "Histórico"], horizontal=True)
+    rango = st.radio("Filtro Temporal:", ["Mes Actual", "Histórico"], horizontal=True)
     f_inicio = date.today().replace(day=1) if rango == "Mes Actual" else date.today() - timedelta(days=9999)
     
     conn = get_connection()
-    df = pd.read_sql(f"SELECT * FROM movimientos WHERE usuario_id={st.session_state.uid} AND fecha >= '{f_inicio}'", conn)
-    df_proy = pd.read_sql(f"SELECT * FROM proyectos WHERE usuario_id={st.session_state.uid}", conn)
-    df_pres = pd.read_sql(f"SELECT * FROM presupuestos WHERE usuario_id={st.session_state.uid}", conn)
+    df = pd.read_sql("SELECT * FROM movimientos WHERE usuario_id=%s AND fecha >= %s", conn, params=(st.session_state.uid, f_inicio))
+    df_proy = pd.read_sql("SELECT * FROM proyectos WHERE usuario_id=%s", conn, params=(st.session_state.uid,))
+    df_pres = pd.read_sql("SELECT * FROM presupuestos WHERE usuario_id=%s", conn, params=(st.session_state.uid,))
     conn.close()
     
     def cvt(fila):
@@ -155,7 +159,6 @@ with t1:
 
     if not df.empty:
         df['monto_crc'] = df.apply(cvt, axis=1)
-        # Protegemos contra NaN si hay datos muy viejos
         df['impuesto_reserva'] = df['impuesto_reserva'].fillna(0)
         impuestos_reserva = df['impuesto_reserva'].sum()
         
@@ -176,7 +179,6 @@ with t1:
             st.markdown("### 🚧 Semáforo de Presupuestos (Este Mes)")
             gastos_mes = df[df['tipo']=='Gasto'].groupby('cat')['monto_crc'].sum().reset_index()
             for _, rp in df_pres.iterrows():
-                # Busca el gasto, si no existe devuelve 0
                 gasto_serie = gastos_mes[gastos_mes['cat'] == rp['cat']]['monto_crc']
                 gastado = gasto_serie.sum() if not gasto_serie.empty else 0
                 limite = float(rp['limite'])
@@ -200,12 +202,12 @@ with t1:
 
 # --- T2: REGISTRO MÁGICO Y MANUAL ---
 with t2:
-    tab_manual, tab_magico = st.tabs(["✍️ Registro Manual y Bóveda", "🪄 Lector SMS Bancario"])
+    tab_manual, tab_magico = st.tabs(["✍️ Registro y Bóveda", "🪄 Lector SMS Bancario"])
     
     with tab_manual:
         conn = get_connection()
-        df_bill = pd.read_sql(f"SELECT id, nombre, moneda FROM billeteras WHERE usuario_id={st.session_state.uid}", conn)
-        df_pry = pd.read_sql(f"SELECT id, nombre FROM proyectos WHERE usuario_id={st.session_state.uid}", conn)
+        df_bill = pd.read_sql("SELECT id, nombre, moneda FROM billeteras WHERE usuario_id=%s", conn, params=(st.session_state.uid,))
+        df_pry = pd.read_sql("SELECT id, nombre FROM proyectos WHERE usuario_id=%s", conn, params=(st.session_state.uid,))
         conn.close()
         
         billeteras_op = [{"label": f"{r['nombre']} ({r['moneda']})", "id": r['id']} for _, r in df_bill.iterrows()] if not df_bill.empty else [{"label": "Cuenta Principal (CRC)", "id": 0}]
@@ -263,48 +265,48 @@ with t3:
     with col_b:
         st.markdown("### 💳 Mis Billeteras")
         with st.form("f_bill"):
-            n_b = st.text_input("Nombre (Ej: Tarjeta BAC, Efectivo)"); t_b = st.selectbox("Tipo", ["Débito / Efectivo", "Tarjeta de Crédito"]); m_b = st.selectbox("Moneda", ["CRC", "USD"])
+            n_b = st.text_input("Nombre (Ej: Tarjeta BAC)"); t_b = st.selectbox("Tipo", ["Débito / Efectivo", "Tarjeta de Crédito"]); m_b = st.selectbox("Moneda", ["CRC", "USD"])
             if st.form_submit_button("CREAR BILLETERA"):
                 conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO billeteras (usuario_id, nombre, tipo, moneda) VALUES (%s,%s,%s,%s)", (st.session_state.uid, n_b, t_b, m_b)); conn.commit(); c.close(); conn.close(); st.rerun()
-        conn = get_connection(); df_b = pd.read_sql(f"SELECT * FROM billeteras WHERE usuario_id={st.session_state.uid}", conn); conn.close()
+        conn = get_connection(); df_b = pd.read_sql("SELECT * FROM billeteras WHERE usuario_id=%s", conn, params=(st.session_state.uid,)); conn.close()
         for _, r in df_b.iterrows(): st.markdown(f'<div class="user-card">💳 {r["nombre"]} ({r["moneda"]})</div>', unsafe_allow_html=True)
             
     with col_p:
-        st.markdown("### 🏢 Proyectos Comerciales")
+        st.markdown("### 🏢 Centros de Costo")
         with st.form("f_proy"):
             n_p = st.text_input("Nombre del Proyecto")
             if st.form_submit_button("CREAR PROYECTO"):
                 conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO proyectos (usuario_id, nombre) VALUES (%s,%s)", (st.session_state.uid, n_p)); conn.commit(); c.close(); conn.close(); st.rerun()
-        conn = get_connection(); df_p = pd.read_sql(f"SELECT * FROM proyectos WHERE usuario_id={st.session_state.uid}", conn); conn.close()
+        conn = get_connection(); df_p = pd.read_sql("SELECT * FROM proyectos WHERE usuario_id=%s", conn, params=(st.session_state.uid,)); conn.close()
         for _, r in df_p.iterrows(): st.markdown(f'<div class="user-card">🏢 {r["nombre"]}</div>', unsafe_allow_html=True)
 
 # --- T4: FIJOS Y PRESUPUESTOS ---
 with t4:
-    tab_pres, tab_fijos = st.tabs(["🚧 Límites Mensuales", "🔁 Gastos Fijos (Suscripciones)"])
+    tab_pres, tab_fijos = st.tabs(["🚧 Límites Mensuales", "🔁 Suscripciones"])
     with tab_pres:
         with st.form("f_pres"):
             cat_p = st.selectbox("Categoría a limitar", ["Súper/Comida", "Transporte", "Ocio", "Otros"])
             lim = st.number_input("Límite mensual (CRC)", min_value=1.0)
             if st.form_submit_button("ESTABLECER LÍMITE"):
                 conn = get_connection(); c = conn.cursor(); c.execute("DELETE FROM presupuestos WHERE usuario_id=%s AND cat=%s", (st.session_state.uid, cat_p)); c.execute("INSERT INTO presupuestos (usuario_id, cat, limite) VALUES (%s,%s,%s)", (st.session_state.uid, cat_p, lim)); conn.commit(); c.close(); conn.close(); st.success("Límite activo."); st.rerun()
-        conn = get_connection(); df_pr = pd.read_sql(f"SELECT * FROM presupuestos WHERE usuario_id={st.session_state.uid}", conn); conn.close()
+        conn = get_connection(); df_pr = pd.read_sql("SELECT * FROM presupuestos WHERE usuario_id=%s", conn, params=(st.session_state.uid,)); conn.close()
         for _, r in df_pr.iterrows():
             st.markdown(f'<div class="user-card">🚧 <b>{r["cat"]}</b> | Límite: ₡{float(r["limite"]):,.0f}</div>', unsafe_allow_html=True)
             if st.button("🗑️ Quitar límite", key=f"dp_{r['id']}"):
                 conn = get_connection(); c = conn.cursor(); c.execute("DELETE FROM presupuestos WHERE id=%s", (r['id'],)); conn.commit(); c.close(); conn.close(); st.rerun()
 
     with tab_fijos:
-        st.write("Registra tus pagos automáticos. GeZo los cobrará el día que indiques.")
+        st.write("GeZo registrará estos cobros automáticamente el día indicado.")
         with st.form("f_susc"):
-            n_s = st.text_input("Nombre (Ej: Netflix, Préstamo)")
+            n_s = st.text_input("Nombre (Ej: Netflix)")
             c1, c2 = st.columns(2); mon_s = c1.selectbox("Moneda", ["CRC", "USD"]); m_s = c2.number_input("Monto", min_value=1.0)
             d_c = st.number_input("Día de cobro cada mes (1-31)", min_value=1, max_value=31)
             cat_s = st.selectbox("Categoría", ["Servicios", "Ocio", "Casa/Alquiler", "Otros"])
             if st.form_submit_button("AGREGAR GASTO FIJO"):
                 conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO suscripciones (usuario_id, nombre, monto, dia_cobro, cat, moneda) VALUES (%s,%s,%s,%s,%s,%s)", (st.session_state.uid, n_s, m_s, d_c, cat_s, mon_s)); conn.commit(); c.close(); conn.close(); st.success("Suscripción activa."); st.rerun()
-        conn = get_connection(); df_sub = pd.read_sql(f"SELECT * FROM suscripciones WHERE usuario_id={st.session_state.uid}", conn); conn.close()
+        conn = get_connection(); df_sub = pd.read_sql("SELECT * FROM suscripciones WHERE usuario_id=%s", conn, params=(st.session_state.uid,)); conn.close()
         for _, r in df_sub.iterrows():
-            st.markdown(f'<div class="user-card">🔁 <b>{r["nombre"]}</b> | {r["moneda"]} {float(r["monto"]):,.0f} | Se cobra el día {r["dia_cobro"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="user-card">🔁 <b>{r["nombre"]}</b> | {r["moneda"]} {float(r["monto"]):,.0f} | Día {r["dia_cobro"]}</div>', unsafe_allow_html=True)
             if st.button("🗑️ Cancelar Auto-Pago", key=f"dsub_{r['id']}"):
                 conn = get_connection(); c = conn.cursor(); c.execute("DELETE FROM suscripciones WHERE id=%s", (r['id'],)); conn.commit(); c.close(); conn.close(); st.rerun()
 
@@ -315,7 +317,7 @@ with t5:
             n = st.text_input("Nombre de la meta"); o = st.number_input("Monto a alcanzar", min_value=1.0)
             if st.form_submit_button("CREAR META"):
                 conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO metas (usuario_id, nombre, objetivo) VALUES (%s,%s,%s)", (st.session_state.uid, n, o)); conn.commit(); c.close(); conn.close(); st.rerun()
-    conn = get_connection(); df_m = pd.read_sql(f"SELECT * FROM metas WHERE usuario_id={st.session_state.uid} ORDER BY id DESC", conn); conn.close()
+    conn = get_connection(); df_m = pd.read_sql("SELECT * FROM metas WHERE usuario_id=%s ORDER BY id DESC", conn, params=(st.session_state.uid,)); conn.close()
     for _, r in df_m.iterrows():
         st.markdown(f'<div class="user-card"><b>🎯 {r["nombre"]}</b><br>Llevas: ₡{float(r["actual"]):,.0f} de ₡{float(r["objetivo"]):,.0f}</div>', unsafe_allow_html=True)
         st.progress(min(float(r['actual'])/float(r['objetivo']), 1.0))
@@ -332,20 +334,17 @@ with t6:
     with td:
         with st.expander("➕ Ingresar Préstamo o Deuda"):
             with st.form("f_pres_bancario"):
-                banco = st.text_input("Entidad Financiera")
-                col_d1, col_d2, col_d3 = st.columns(3)
-                m_d = col_d1.number_input("Monto Total", min_value=1.0)
-                tasa = col_d2.number_input("Tasa Interés Anual (%)", min_value=0.0)
-                plazo = col_d3.number_input("Plazo (Meses)", min_value=1)
+                banco = st.text_input("Entidad Financiera"); col_d1, col_d2, col_d3 = st.columns(3)
+                m_d = col_d1.number_input("Monto Total", min_value=1.0); tasa = col_d2.number_input("Tasa Interés Anual (%)", min_value=0.0); plazo = col_d3.number_input("Plazo (Meses)", min_value=1)
                 mon_d = st.selectbox("Moneda", ["CRC", "USD"])
                 if st.form_submit_button("REGISTRAR OBLIGACIÓN"):
                     vence = date.today() + timedelta(days=plazo*30)
                     conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO deudas (usuario_id, nombre, monto_total, tipo_registro, fecha_vence, moneda, tasa_interes, plazo_meses) VALUES (%s,%s,%s,'DEUDA',%s,%s,%s,%s)", (st.session_state.uid, banco, m_d, vence, mon_d, tasa, plazo)); conn.commit(); c.close(); conn.close(); st.rerun()
-        conn = get_connection(); df_d = pd.read_sql(f"SELECT * FROM deudas WHERE usuario_id={st.session_state.uid} AND tipo_registro='DEUDA'", conn); conn.close()
+        conn = get_connection(); df_d = pd.read_sql("SELECT * FROM deudas WHERE usuario_id=%s AND tipo_registro='DEUDA'", conn, params=(st.session_state.uid,)); conn.close()
         for _, r in df_d.iterrows():
             pend = float(r['monto_total']) - float(r['pagado'])
             cuota = calcular_cuota_nivelada(float(r['monto_total']), float(r['tasa_interes']), int(r['plazo_meses']))
-            st.markdown(f'<div class="user-card">🏦 <b>{r["nombre"]}</b> | Saldo: {r["moneda"]} {pend:,.0f}<br>Tasa: {r["tasa_interes"]}% | Cuota Mensual Sugerida: <b>{r["moneda"]} {cuota:,.0f}</b></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="user-card">🏦 <b>{r["nombre"]}</b> | Saldo: {r["moneda"]} {pend:,.0f}<br>Tasa: {r["tasa_interes"]}% | Cuota Mensual: <b>{r["moneda"]} {cuota:,.0f}</b></div>', unsafe_allow_html=True)
             if pend > 0:
                 c1, c2, c3 = st.columns([2,1,1]); m_p = c1.number_input("Abono", min_value=0.0, value=min(cuota, pend), key=f"p_{r['id']}")
                 if c2.button("ABONAR", key=f"b_{r['id']}", use_container_width=True):
@@ -359,13 +358,13 @@ with t6:
                 p = st.text_input("Deudor"); c_m1, c_m2 = st.columns([1,3]); md_c = c_m1.selectbox("Mon", ["CRC", "USD"]); m_c = c_m2.number_input("Monto", min_value=1.0); v_c = st.date_input("Fecha promesa")
                 if st.form_submit_button("GUARDAR"):
                     conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO deudas (usuario_id, nombre, monto_total, tipo_registro, fecha_vence, moneda) VALUES (%s,%s,%s,'COBRO',%s,%s)", (st.session_state.uid, p, m_c, v_c, md_c)); conn.commit(); c.close(); conn.close(); st.rerun()
-        conn = get_connection(); df_c = pd.read_sql(f"SELECT * FROM deudas WHERE usuario_id={st.session_state.uid} AND tipo_registro='COBRO'", conn); conn.close()
+        conn = get_connection(); df_c = pd.read_sql("SELECT * FROM deudas WHERE usuario_id=%s AND tipo_registro='COBRO'", conn, params=(st.session_state.uid,)); conn.close()
         for _, r in df_c.iterrows():
             pen = float(r['monto_total']) - float(r['pagado'])
             st.markdown(f'<div class="user-card">🟢 <b>{r["nombre"]}</b> | Falta que paguen: {r["moneda"]} {pen:,.0f}</div>', unsafe_allow_html=True)
             if pen > 0:
                 c1, c2, c3 = st.columns([2,1,1]); p_c = c1.number_input("Recibir", min_value=0.0, max_value=pen, key=f"pc_{r['id']}")
-                if c2.button("REGISTRAR PAGO", key=f"bc_{r['id']}", use_container_width=True):
+                if c2.button("REGISTRAR", key=f"bc_{r['id']}", use_container_width=True):
                     conn = get_connection(); c = conn.cursor(); c.execute("UPDATE deudas SET pagado=pagado+%s WHERE id=%s", (p_c, r['id'])); conn.commit(); c.close(); conn.close()
                     reg_mov(p_c, "Ingreso", "💸 Cobro", f"De: {r['nombre']}", r['moneda']); st.rerun()
                 if c3.button("🗑️", key=f"dc_{r['id']}"):
@@ -373,7 +372,7 @@ with t6:
 
 # --- T7: SINPE MÓVIL Y AGENDA ---
 with t7:
-    conn = get_connection(); df_cnt = pd.read_sql(f"SELECT * FROM contactos WHERE usuario_id={st.session_state.uid} ORDER BY nombre", conn); conn.close()
+    conn = get_connection(); df_cnt = pd.read_sql("SELECT * FROM contactos WHERE usuario_id=%s ORDER BY nombre", conn, params=(st.session_state.uid,)); conn.close()
     col_s1, col_s2 = st.columns([1.2, 1])
     with col_s1:
         st.markdown("**1. Enviar Dinero**")
@@ -409,24 +408,25 @@ with t7:
 with t8:
     st.subheader("📜 Libro Mayor Contable y Ajustes")
     conn = get_connection()
-    df_h = pd.read_sql(f"SELECT id, fecha, tipo, cat, monto, moneda, descrip, impuesto_reserva, comprobante FROM movimientos WHERE usuario_id={st.session_state.uid} ORDER BY id DESC LIMIT 100", conn)
+    df_h = pd.read_sql("SELECT id, fecha, tipo, cat, monto, moneda, descrip, impuesto_reserva, comprobante FROM movimientos WHERE usuario_id=%s ORDER BY id DESC LIMIT 100", conn, params=(st.session_state.uid,))
     conn.close()
     
     if not df_h.empty:
-        # Exportar CSV de forma limpia
         df_csv = df_h.drop(columns=['comprobante']).rename(columns={'fecha':'Fecha', 'tipo':'Tipo', 'cat':'Categoría', 'monto':'Monto', 'moneda':'Divisa', 'descrip':'Detalle', 'impuesto_reserva':'Retenido'})
         csv = df_csv.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Descargar Libro Mayor (Excel/CSV)", data=csv, file_name=f'GeZo_Auditoria_{date.today()}.csv', mime='text/csv')
         st.divider()
         
-        # Historial Interactivo y Bóveda de Recibos (Totalmente en Minúsculas)
         for _, r in df_h.head(30).iterrows():
             with st.expander(f"{r['fecha']} | {r['tipo']} | {r['moneda']} {float(r['monto']):,.0f} | {r['cat']}"):
                 st.write(f"**Detalle:** {r['descrip']}")
                 if pd.notnull(r['impuesto_reserva']) and float(r['impuesto_reserva']) > 0: 
                     st.write(f"**Impuesto Retenido:** ₡{float(r['impuesto_reserva']):,.0f}")
                 if r['comprobante']: 
-                    st.image(base64.b64decode(r['comprobante']), caption="Recibo Adjunto", use_container_width=True)
+                    try:
+                        st.image(base64.b64decode(r['comprobante']), caption="Recibo Adjunto", use_container_width=True)
+                    except:
+                        st.warning("El formato del recibo no es soportado o está corrupto.")
                 if st.button("🗑️ Borrar registro", key=f"delh_{r['id']}"):
                     conn = get_connection(); c = conn.cursor(); c.execute("DELETE FROM movimientos WHERE id=%s", (r['id'],)); conn.commit(); c.close(); conn.close(); st.rerun()
     else: 
