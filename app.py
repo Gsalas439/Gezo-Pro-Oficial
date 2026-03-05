@@ -23,14 +23,11 @@ st.markdown("""
     .metric-value { font-size: 2.2em; font-weight: 900; color: #00f2fe; }
     .metric-label { font-size: 0.9em; color: #888; text-transform: uppercase; }
     
-    /* Burbuja de IA */
     .ia-box {
         background: rgba(0, 242, 254, 0.05); border: 1px solid #00f2fe;
         padding: 20px; border-radius: 20px; border-left: 10px solid #00f2fe;
-        margin-top: 20px; position: relative;
+        margin-top: 20px;
     }
-    .ia-badge { background: #00f2fe; color: #000; padding: 2px 10px; border-radius: 5px; font-weight: bold; font-size: 0.7em; }
-    
     .user-card { background: rgba(255, 255, 255, 0.03); padding: 15px; border-radius: 12px; border: 1px solid #222; margin-bottom: 10px; border-left: 5px solid #00f2fe; }
     .bank-btn { 
         background: #00f2fe; color: #000 !important; padding: 15px; border-radius: 12px; 
@@ -39,7 +36,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. MOTOR DE BASE DE DATOS ---
+# --- 2. BASE DE DATOS ---
 @st.cache_resource
 def get_connection():
     try: return psycopg2.connect(st.secrets["DB_URL"], connect_timeout=60)
@@ -75,14 +72,13 @@ if not st.session_state.autenticado:
             res = c.fetchone()
             if res and date.today() <= res[4]:
                 st.session_state.update({"autenticado":True, "uid":res[0], "uname":res[1], "rol":res[2], "plan":res[3]}); st.rerun()
-            else: st.error("Acceso denegado o membresía vencida.")
-            c.close()
+            else: st.error("Acceso denegado."); c.close()
     st.stop()
 
 # --- 4. NAVEGACIÓN ---
 with st.sidebar:
     st.markdown(f"### 👑 {st.session_state.uname}")
-    menu = st.radio("MENÚ", ["📊 Dashboard IA", "💸 Registros", "🎯 Metas", "🏦 Deudas", "📱 SINPE", "📜 Historial"])
+    menu = st.radio("MENÚ", ["📊 Dashboard IA", "💸 Registros", "🎯 Metas", "🏦 Deudas y Cobros", "📱 SINPE", "📜 Historial"])
     with st.expander("🔐 Seguridad"):
         nv_p = st.text_input("Nueva Clave", type="password")
         if st.button("CAMBIAR"):
@@ -92,8 +88,8 @@ with st.sidebar:
 # --- 5. MÓDULOS ---
 
 if menu == "📊 Dashboard IA":
-    st.header("Análisis de Inteligencia Financiera")
-    per = st.select_slider("Rango de análisis:", options=["Día", "Semana", "Mes"])
+    st.header("Inteligencia Financiera")
+    per = st.select_slider("Análisis:", options=["Día", "Semana", "Mes"])
     dias = {"Día": 0, "Semana": 7, "Mes": 30}
     f_inicio = date.today() - timedelta(days=dias[per])
     
@@ -109,62 +105,82 @@ if menu == "📊 Dashboard IA":
         with c2: st.markdown(f'<div class="balance-card"><p class="metric-label">Gastos</p><p class="metric-value" style="color:#ff4b4b;">₡{gas:,.0f}</p></div>', unsafe_allow_html=True)
         with c3: st.markdown(f'<div class="balance-card"><p class="metric-label">Generación Neta</p><p class="metric-value" style="color:#2ecc71;">₡{neto:,.0f}</p></div>', unsafe_allow_html=True)
         
-        # --- LÓGICA DE IA ---
+        # IA ADVISOR
         st.markdown('<div class="ia-box">', unsafe_allow_html=True)
-        st.markdown('<span class="ia-badge">GEZO AI ADVISOR</span>', unsafe_allow_html=True)
-        
+        st.subheader("🤖 GeZo AI Advisor")
         ahorro_ideal = neto * 0.20 if neto > 0 else 0
-        
         if neto < 0:
-            st.markdown(f"### 🔴 ¡Alerta de Números Rojos, {st.session_state.uname}!")
-            st.write("Tus gastos están superando tus ingresos. Te recomiendo revisar la sección de 'Historial' y recortar gastos variables inmediatamente. ¡No uses tarjetas de crédito hoy!")
-        elif neto > 0:
-            st.markdown(f"### 🟢 ¡Excelente trabajo, {st.session_state.uname}!")
-            st.write(f"Vas por muy buen camino. Para mantener una **liquidez perfecta**, hoy deberías separar **₡{ahorro_ideal:,.0f}** (20%) hacia tus metas de ahorro.")
+            st.error(f"⚠️ {st.session_state.uname}, estás en Números Rojos. Has gastado ₡{abs(neto):,.0f} más de lo que ganaste. ¡Freno de mano a los gastos innecesarios!")
         else:
-            st.write("Estás en el punto de equilibrio. Intenta generar un ingreso extra hoy para salir de la zona neutra.")
-        
+            st.success(f"✅ ¡Perspectiva Positiva! Para una liquidez perfecta, traslada ₡{ahorro_ideal:,.0f} a tus ahorros ahora mismo.")
         st.markdown('</div>', unsafe_allow_html=True)
-        st.plotly_chart(px.bar(df, x='cat', y='monto', color='tipo', template="plotly_dark"), use_container_width=True)
-    else: st.info("Registra tu primer movimiento para activar la IA.")
+        st.plotly_chart(px.pie(df[df['tipo']=='Gasto'], values='monto', names='cat', hole=.4, template="plotly_dark"))
+    else: st.info("Sin datos para analizar.")
 
 elif menu == "💸 Registros":
-    st.header("Entrada/Salida")
-    t_mov = st.radio("Tipo:", ["Gasto", "Ingreso"], horizontal=True)
-    cat = st.selectbox("Categoría:", ["Salario", "Ventas", "Luz/Agua", "Comida", "Casa", "Otros"] if t_mov == "Gasto" else ["Salario", "Ventas", "SINPE", "Otros"])
-    with st.form("f"):
+    st.header("Nuevo Movimiento")
+    t = st.radio("Tipo:", ["Gasto", "Ingreso"], horizontal=True)
+    cats = ["Pensión", "Salario", "Ventas", "Comida", "Luz/Agua", "Alquiler", "Gasolina", "Ocio", "Otros"]
+    cat = st.selectbox("Categoría:", cats)
+    with st.form("fr"):
         m = st.number_input("Monto (₡)", min_value=0.0); d = st.text_input("Nota")
         if st.form_submit_button("GUARDAR"):
-            reg_mov(m, t_mov, cat, d); st.success("Guardado"); time.sleep(0.5); st.rerun()
+            reg_mov(m, t, cat, d); st.success("Registrado"); time.sleep(0.5); st.rerun()
 
 elif menu == "🎯 Metas":
-    st.header("Mis Metas")
-    with st.expander("Nueva Meta"):
+    st.header("Ahorros Proyectados")
+    with st.expander("➕ Nueva Meta"):
         with st.form("fm"):
             n = st.text_input("Nombre"); obj = st.number_input("Objetivo")
             if st.form_submit_button("CREAR"):
                 conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO metas (usuario_id, nombre, objetivo) VALUES (%s,%s,%s)", (st.session_state.uid, n, obj)); conn.commit(); c.close(); st.rerun()
     df_m = pd.read_sql(f"SELECT * FROM metas WHERE usuario_id={st.session_state.uid}", get_connection())
     for _, r in df_m.iterrows():
-        st.markdown(f'<div class="user-card">🎯 {r["nombre"]} | ₡{float(r["actual"]):,.0f} / ₡{float(r["objetivo"]):,.0f}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="user-card">🎯 {r["nombre"]} (₡{float(r["actual"]):,.0f} / ₡{float(r["objetivo"]):,.0f})</div>', unsafe_allow_html=True)
         st.progress(min(float(r['actual'])/float(r['objetivo']), 1.0))
-        c1, c2 = st.columns([2,1]); m_a = c1.number_input("Ahorrar:", min_value=0.0, key=r['id'])
+        c1, c2 = st.columns([2,1]); m_a = c1.number_input("Ahorrar:", min_value=0.0, key=f"m{r['id']}")
         if c2.button("ABONAR", key=f"b{r['id']}"):
             conn = get_connection(); c = conn.cursor(); c.execute("UPDATE metas SET actual=actual+%s WHERE id=%s", (m_a, r['id'])); conn.commit(); c.close()
-            reg_mov(m_a, "Gasto", "🎯 Ahorro", f"Meta: {r['nombre']}"); st.rerun()
+            reg_mov(m_a, "Gasto", "🎯 Ahorro", f"Abono a {r['nombre']}"); st.rerun()
 
-elif menu == "🏦 Deudas":
-    st.header("Deudas y Cobros")
-    # Pestañas de Deudas/Cobros restauradas
-    t1, t2 = st.tabs(["💸 Debo", "💰 Me deben"])
-    # ... (Lógica de deudas igual a la anterior pero con reg_mov conectado)
+elif menu == "🏦 Deudas y Cobros":
+    st.header("Control de Compromisos")
+    t1, t2 = st.tabs(["💸 Mis Deudas", "💰 Mis Cobros"])
+    with t1:
+        with st.expander("Registrar Deuda"):
+            with st.form("fd"):
+                n = st.text_input("Acreedor"); m = st.number_input("Monto total"); fv = st.date_input("Vence")
+                if st.form_submit_button("GUARDAR DEUDA"):
+                    conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO deudas (usuario_id, nombre, monto_total, tipo_registro, fecha_vence) VALUES (%s,%s,%s,'DEUDA',%s)", (st.session_state.uid, n, m, fv)); conn.commit(); c.close(); st.rerun()
+        df_d = pd.read_sql(f"SELECT * FROM deudas WHERE usuario_id={st.session_state.uid} AND tipo_registro='DEUDA'", get_connection())
+        for _, r in df_d.iterrows():
+            pe = float(r['monto_total']) - float(r['pagado'])
+            st.markdown(f'<div class="user-card">🔴 {r["nombre"]} | Pendiente: ₡{pe:,.0f}</div>', unsafe_allow_html=True)
+            ca, cb = st.columns([2,1]); ab = ca.number_input("Abono:", min_value=0.0, key=f"d{r['id']}")
+            if cb.button("PAGAR", key=f"bd{r['id']}"):
+                conn = get_connection(); c = conn.cursor(); c.execute("UPDATE deudas SET pagado=pagado+%s WHERE id=%s", (ab, r['id'])); conn.commit(); c.close()
+                reg_mov(ab, "Gasto", "🏦 Deuda", f"Pago a {r['nombre']}"); st.rerun()
+    with t2:
+        with st.expander("Registrar Cobro"):
+            with st.form("fc"):
+                n = st.text_input("Deudor"); m = st.number_input("Monto"); fv = st.date_input("Fecha")
+                if st.form_submit_button("GUARDAR COBRO"):
+                    conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO deudas (usuario_id, nombre, monto_total, tipo_registro, fecha_vence) VALUES (%s,%s,%s,'COBRO',%s)", (st.session_state.uid, n, m, fv)); conn.commit(); c.close(); st.rerun()
+        df_c = pd.read_sql(f"SELECT * FROM deudas WHERE usuario_id={st.session_state.uid} AND tipo_registro='COBRO'", get_connection())
+        for _, r in df_c.iterrows():
+            pe = float(r['monto_total']) - float(r['pagado'])
+            st.markdown(f'<div class="user-card">🟢 {r["nombre"]} | Pendiente: ₡{pe:,.0f}</div>', unsafe_allow_html=True)
+            ca, cb = st.columns([2,1]); ab = ca.number_input("Cobrado:", min_value=0.0, key=f"c{r['id']}")
+            if cb.button("RECIBIR", key=f"bc{r['id']}"):
+                conn = get_connection(); c = conn.cursor(); c.execute("UPDATE deudas SET pagado=pagado+%s WHERE id=%s", (ab, r['id'])); conn.commit(); c.close()
+                reg_mov(ab, "Ingreso", "💸 Cobro", f"De {r['nombre']}"); st.rerun()
 
 elif menu == "📱 SINPE":
-    st.header("SINPE Rápido")
+    st.header("SINPE Móvil")
     num = st.text_input("Número:"); mon = st.number_input("Monto")
     if st.button("PROCESAR"):
         reg_mov(mon, "Gasto", "📱 SINPE", f"A: {num}")
-        st.markdown(f'<a href="https://www.google.com" target="_blank" class="bank-btn">🏦 IR AL BANCO</a>', unsafe_allow_html=True)
+        st.markdown(f'<a href="https://www.google.com" target="_blank" class="bank-btn">🏦 ABRIR BANCO</a>', unsafe_allow_html=True)
 
 elif menu == "📜 Historial":
     st.header("Historial")
@@ -173,5 +189,5 @@ elif menu == "📜 Historial":
         c1, c2, c3 = st.columns([1,4,1])
         c1.write("🟢" if row['tipo']=="Ingreso" else "🔴")
         c2.write(f"**{row['cat']}** | ₡{row['monto']:,.0f}")
-        if c3.button("🗑️", key=row['id']):
+        if c3.button("🗑️", key=f"h{row['id']}"):
             conn = get_connection(); c = conn.cursor(); c.execute(f"DELETE FROM movimientos WHERE id={row['id']}"); conn.commit(); c.close(); st.rerun()
