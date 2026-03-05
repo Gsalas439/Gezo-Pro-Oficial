@@ -7,13 +7,8 @@ from fpdf import FPDF
 import io
 import time
 
-# --- 1. CONFIGURACIÓN ESTÉTICA ELITE PRO ---
-st.set_page_config(
-    page_title="GeZo Elite Pro",
-    page_icon="💎",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# --- 1. CONFIGURACIÓN E INTERFAZ ELITE ---
+st.set_page_config(page_title="GeZo Elite Pro", page_icon="💎", layout="wide")
 
 st.markdown("""
     <style>
@@ -100,14 +95,14 @@ if not st.session_state.autenticado:
 # --- 5. NAVEGACIÓN ---
 with st.sidebar:
     st.markdown(f"## 👑 {st.session_state.uname}"); st.divider()
-    menu = st.radio("MÓDULOS", ["📊 Dashboard", "💸 Registrar Cuentas", "🎯 Metas", "🏦 Deudas", "📱 SINPE Rápido", "💱 Conversor", "⚙️ Admin"])
+    menu = st.radio("MÓDULOS", ["📊 Dashboard", "💸 Registrar Movimientos", "🎯 Metas", "🏦 Deudas", "📱 SINPE Rápido", "💱 Conversor", "⚙️ Admin"])
     if st.button("🔒 SALIR"): st.session_state.autenticado = False; st.rerun()
 
-# --- 6. MÓDULO REGISTRO (CORRECCIÓN FINAL DE LISTAS SEPARADAS) ---
-if menu == "💸 Registrar Cuentas":
+# --- 6. MÓDULO REGISTRO: CORRECCIÓN RADICAL DE LISTAS ---
+if menu == "💸 Registrar Movimientos":
     st.header("Gestión de Entradas y Salidas")
     
-    # 1. Definimos las listas claramente
+    # Listas Maetras
     lista_gastos = [
         "⚖️ Pensión Alimentaria", "⚡ Recibo de Luz", "💧 Recibo de Agua", 
         "🏠 Alquiler/Hipoteca", "🛒 Súper/Comida", "📱 Plan Celular/Net", 
@@ -120,29 +115,36 @@ if menu == "💸 Registrar Cuentas":
         "🏢 Rentas/Alquileres", "🎁 Regalos", "💸 Cobros", "📦 Otros Ingresos"
     ]
     
-    with st.form("registro_mov"):
-        col1, col2 = st.columns(2)
-        with col1:
-            tipo = st.radio("Tipo de Movimiento:", ["Gasto", "Ingreso"], horizontal=True)
-            monto = st.number_input("Monto (₡)", min_value=0.0, step=1000.0)
+    # Usamos un contenedor para que el cambio de radio refresque el selectbox
+    with st.container():
+        tipo = st.radio("¿Qué tipo de movimiento es?", ["Gasto", "Ingreso"], horizontal=True, key="tipo_selector")
         
-        with col2:
-            # AQUÍ ESTÁ LA CORRECCIÓN: Filtrado dinámico real
-            if tipo == "Ingreso":
-                categoria = st.selectbox("Seleccione el Ingreso:", lista_ingresos)
-            else:
-                categoria = st.selectbox("Seleccione el Gasto:", lista_gastos)
-                
-            fecha_validez = st.date_input("Fecha Correspondiente:", datetime.now())
-        
-        detalle = st.text_input("Comentario:")
-        
-        if st.form_submit_button("GUARDAR REGISTRO"):
-            conn = get_connection(); c = conn.cursor()
-            c.execute("""INSERT INTO movimientos (usuario_id, fecha, descrip, monto, tipo, cat, vence) 
-                         VALUES (%s,%s,%s,%s,%s,%s,%s)""", 
-                      (st.session_state.uid, datetime.now().date(), f"{categoria}: {detalle}", monto, tipo, categoria, fecha_validez))
-            conn.commit(); c.close(); st.success("✅ Guardado correctamente."); time.sleep(1); st.rerun()
+        with st.form("registro_maestro"):
+            col1, col2 = st.columns(2)
+            with col1:
+                monto = st.number_input("Monto en Colones (₡)", min_value=0.0, step=1000.0)
+                # La categoría se define afuera del form pero se procesa dentro según el 'tipo'
+                if tipo == "Ingreso":
+                    categoria_final = st.selectbox("Categoría de Ingreso:", lista_ingresos, key="sel_ing")
+                else:
+                    categoria_final = st.selectbox("Categoría de Gasto:", lista_gastos, key="sel_gas")
+            
+            with col2:
+                fecha_pago_efectiva = st.date_input("Fecha de este movimiento:", datetime.now())
+                detalle_extra = st.text_input("Detalle (Opcional):", placeholder="Ej: Pago quincena 1")
+            
+            if st.form_submit_button("GUARDAR EN BASE DE DATOS"):
+                try:
+                    conn = get_connection(); c = conn.cursor()
+                    # Guardamos 'tipo' directamente del radio anterior al form
+                    c.execute("""INSERT INTO movimientos (usuario_id, fecha, descrip, monto, tipo, cat, vence) 
+                                 VALUES (%s,%s,%s,%s,%s,%s,%s)""", 
+                              (st.session_state.uid, datetime.now().date(), f"{categoria_final}: {detalle_extra}", monto, tipo, categoria_final, fecha_pago_efectiva))
+                    conn.commit(); c.close()
+                    st.success(f"✅ {tipo} de {categoria_final} guardado con éxito.")
+                    time.sleep(1); st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
 # --- 7. DASHBOARD ---
 elif menu == "📊 Dashboard":
