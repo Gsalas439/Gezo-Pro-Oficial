@@ -7,7 +7,7 @@ from fpdf import FPDF
 import io
 import time
 
-# --- 1. CONFIGURACIÓN E INTERFAZ ELITE ---
+# --- 1. ESTÉTICA ELITE PRO ---
 st.set_page_config(page_title="GeZo Elite Pro", page_icon="💎", layout="wide")
 
 st.markdown("""
@@ -15,18 +15,17 @@ st.markdown("""
     .main { background-color: #0b0e14; color: #e0e0e0; }
     [data-testid="stSidebar"] { background-color: #0f121a; border-right: 1px solid #1e2633; }
     div[data-testid="stMetric"] {
-        background: rgba(0, 198, 255, 0.08);
-        border-radius: 20px; padding: 25px; border: 1px solid #00c6ff;
-        box-shadow: 0px 8px 25px rgba(0, 198, 255, 0.15); border-left: 10px solid #00c6ff;
+        background: rgba(0, 198, 255, 0.08); border-radius: 20px; padding: 25px; 
+        border: 1px solid #00c6ff; box-shadow: 0px 8px 25px rgba(0, 198, 255, 0.15); border-left: 10px solid #00c6ff;
     }
     .stButton>button {
         border-radius: 15px; background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
-        color: #000 !important; font-weight: 800; width: 100%; border: none; height: 4.2em;
-        transition: 0.4s all ease; text-transform: uppercase; letter-spacing: 1.5px;
+        color: #000 !important; font-weight: 800; width: 100%; border: none; height: 3.5em;
+        transition: 0.4s all; text-transform: uppercase;
     }
-    .stButton>button:hover { transform: translateY(-4px); box-shadow: 0px 10px 30px #00c6ff; color: #fff !important; }
-    .user-card { background: rgba(255, 255, 255, 0.05); padding: 30px; border-radius: 20px; border: 1px solid #333; margin-bottom: 20px; border-left: 8px solid #00f2fe; }
-    .bank-btn { background-color: #1a1d24; border: 2px solid #00c6ff; color: #00c6ff !important; padding: 20px; border-radius: 15px; text-align: center; display: block; text-decoration: none; font-weight: bold; margin-top: 15px; }
+    .stButton>button:hover { transform: translateY(-3px); box-shadow: 0px 10px 30px #00c6ff; color: #fff !important; }
+    .user-card { background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 15px; border: 1px solid #333; margin-bottom: 15px; border-left: 5px solid #00f2fe; }
+    .delete-btn { color: #ff4b4b !important; border: 1px solid #ff4b4b !important; background: transparent !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -55,144 +54,142 @@ def inicializar_db():
 
 inicializar_db()
 
-# --- 3. SERVICIOS PDF ---
+# --- 3. FUNCIONES AUXILIARES ---
 def limpiar_texto(texto):
     if not texto: return ""
     acentos = {"á":"a","é":"e","í":"i","ó":"o","ú":"u","ñ":"n","₡":"CRC ","Á":"A","É":"E","Í":"I","Ó":"O","Ú":"U","Ñ":"N"}
     for k, v in acentos.items(): texto = str(texto).replace(k, v)
     return texto.encode('latin-1', 'ignore').decode('latin-1')
 
-def generar_pdf_venda(nombre, plan, monto, vence):
+def generar_pdf(nombre, plan, monto, vence):
     pdf = FPDF(); pdf.add_page(); pdf.set_fill_color(11, 14, 20); pdf.rect(0, 0, 210, 297, 'F')
-    pdf.set_text_color(0, 242, 254); pdf.set_font("Arial", 'B', 32)
-    pdf.cell(200, 60, limpiar_texto("GEZO ELITE PRO 💎"), ln=True, align='C')
-    pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 16)
-    pdf.cell(200, 10, "COMPROBANTE OFICIAL", ln=True, align='C')
-    pdf.ln(20); pdf.set_font("Arial", '', 14)
-    pdf.cell(200, 12, f"TITULAR: {limpiar_texto(nombre.upper())}", ln=True)
-    pdf.cell(200, 12, f"PLAN: {limpiar_texto(plan)}", ln=True)
-    pdf.cell(200, 12, f"INVERSION: CRC {monto}", ln=True)
-    pdf.cell(200, 12, f"VENCIMIENTO: {vence}", ln=True)
+    pdf.set_text_color(0, 242, 254); pdf.set_font("Arial", 'B', 30)
+    pdf.cell(200, 50, limpiar_texto("GEZO ELITE PRO 💎"), ln=True, align='C')
+    pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", '', 14); pdf.ln(10)
+    pdf.cell(200, 10, f"CLIENTE: {limpiar_texto(nombre.upper())}", ln=True)
+    pdf.cell(200, 10, f"PLAN: {limpiar_texto(plan)}", ln=True)
+    pdf.cell(200, 10, f"MONTO: CRC {monto}", ln=True)
+    pdf.cell(200, 10, f"EXPIRA: {vence}", ln=True)
     return pdf.output(dest='S').encode('latin-1', errors='replace')
 
-# --- 4. ACCESO ---
+# --- 4. LOGIN ---
 if 'autenticado' not in st.session_state: st.session_state.autenticado = False
 if not st.session_state.autenticado:
     st.title("💎 GeZo Elite Pro Access")
     with st.form("login"):
         u = st.text_input("Usuario"); p = st.text_input("Clave", type="password")
-        if st.form_submit_button("ACCEDER"):
+        if st.form_submit_button("INGRESAR"):
             conn = get_connection(); c = conn.cursor()
             c.execute("SELECT id, nombre, rol, plan, expira FROM usuarios WHERE nombre=%s AND clave=%s", (u, p))
             res = c.fetchone()
             if res:
-                if datetime.now().date() > res[4]: st.error("Suscripción vencida.")
+                if datetime.now().date() > res[4]: st.error("Membresía vencida.")
                 else: st.session_state.update({"autenticado":True, "uid":res[0], "uname":res[1], "rol":res[2], "plan":res[3]}); st.rerun()
-            else: st.error("Error de acceso.")
+            else: st.error("Acceso incorrecto.")
             c.close()
     st.stop()
 
-# --- 5. NAVEGACIÓN ---
+# --- 5. MENÚ ---
 with st.sidebar:
-    st.markdown(f"## 👑 {st.session_state.uname}"); st.divider()
-    menu = st.radio("MÓDULOS", ["📊 Dashboard", "💸 Registrar Movimientos", "🎯 Metas", "🏦 Deudas", "📱 SINPE Rápido", "💱 Conversor", "⚙️ Admin"])
-    if st.button("🔒 SALIR"): st.session_state.autenticado = False; st.rerun()
+    st.markdown(f"### Bienvenido, {st.session_state.uname} 👑")
+    menu = st.radio("NAVEGACIÓN", ["📊 Dashboard", "💸 Nuevo Registro", "📜 Historial / Borrar", "🎯 Metas", "🏦 Deudas", "⚙️ Admin"])
+    if st.button("CERRAR SESIÓN"): st.session_state.autenticado = False; st.rerun()
 
-# --- 6. MÓDULO REGISTRO: CORRECCIÓN RADICAL DE LISTAS ---
-if menu == "💸 Registrar Movimientos":
-    st.header("Gestión de Entradas y Salidas")
+# --- 6. MÓDULO: NUEVO REGISTRO (CON SEPARACIÓN TOTAL) ---
+if menu == "💸 Nuevo Registro":
+    st.header("Entradas y Salidas de Capital")
     
-    # Listas Maetras
-    lista_gastos = [
-        "⚖️ Pensión Alimentaria", "⚡ Recibo de Luz", "💧 Recibo de Agua", 
-        "🏠 Alquiler/Hipoteca", "🛒 Súper/Comida", "📱 Plan Celular/Net", 
-        "🏦 Cuota Préstamo", "🚗 Gasolina/Transporte", "📦 Otros Gastos"
-    ]
+    lista_g = ["⚖️ Pensión Alimentaria", "⚡ Recibo de Luz", "💧 Recibo de Agua", "🏠 Alquiler/Hipoteca", "🛒 Súper/Comida", "📱 Plan Celular/Net", "🏦 Cuota Préstamo", "🚗 Gasolina/Transporte", "📦 Otros Gastos"]
+    lista_i = ["💵 Salario Mensual", "💰 Aguinaldo", "📱 SINPE Recibido", "📈 Ventas/Negocio", "🧧 Comisiones", "🚜 Freelance/Servicios", "🏢 Rentas/Alquileres", "🎁 Regalos", "💸 Cobros", "📦 Otros Ingresos"]
     
-    lista_ingresos = [
-        "💵 Salario Mensual", "💰 Aguinaldo", "📱 SINPE Recibido", 
-        "📈 Ventas/Negocio", "🧧 Comisiones", "🚜 Freelance/Servicios", 
-        "🏢 Rentas/Alquileres", "🎁 Regalos", "💸 Cobros", "📦 Otros Ingresos"
-    ]
+    tipo = st.radio("Seleccione el Tipo:", ["Gasto", "Ingreso"], horizontal=True, key="tipo_reg")
     
-    # Usamos un contenedor para que el cambio de radio refresque el selectbox
-    with st.container():
-        tipo = st.radio("¿Qué tipo de movimiento es?", ["Gasto", "Ingreso"], horizontal=True, key="tipo_selector")
+    # El selectbox cambia según el radio ANTES de entrar al form
+    if tipo == "Ingreso":
+        cat_seleccionada = st.selectbox("Categoría de Ingreso:", lista_i, key="cat_i")
+    else:
+        cat_seleccionada = st.selectbox("Categoría de Gasto:", lista_g, key="cat_g")
+
+    with st.form("form_reg"):
+        col1, col2 = st.columns(2)
+        with col1:
+            monto = st.number_input("Monto (₡)", min_value=0.0, step=1000.0)
+            fecha_pago = st.date_input("Fecha Correspondiente:", datetime.now())
+        with col2:
+            detalle = st.text_input("Nota / Comentario:")
         
-        with st.form("registro_maestro"):
-            col1, col2 = st.columns(2)
-            with col1:
-                monto = st.number_input("Monto en Colones (₡)", min_value=0.0, step=1000.0)
-                # La categoría se define afuera del form pero se procesa dentro según el 'tipo'
-                if tipo == "Ingreso":
-                    categoria_final = st.selectbox("Categoría de Ingreso:", lista_ingresos, key="sel_ing")
-                else:
-                    categoria_final = st.selectbox("Categoría de Gasto:", lista_gastos, key="sel_gas")
-            
-            with col2:
-                fecha_pago_efectiva = st.date_input("Fecha de este movimiento:", datetime.now())
-                detalle_extra = st.text_input("Detalle (Opcional):", placeholder="Ej: Pago quincena 1")
-            
-            if st.form_submit_button("GUARDAR EN BASE DE DATOS"):
-                try:
-                    conn = get_connection(); c = conn.cursor()
-                    # Guardamos 'tipo' directamente del radio anterior al form
-                    c.execute("""INSERT INTO movimientos (usuario_id, fecha, descrip, monto, tipo, cat, vence) 
-                                 VALUES (%s,%s,%s,%s,%s,%s,%s)""", 
-                              (st.session_state.uid, datetime.now().date(), f"{categoria_final}: {detalle_extra}", monto, tipo, categoria_final, fecha_pago_efectiva))
-                    conn.commit(); c.close()
-                    st.success(f"✅ {tipo} de {categoria_final} guardado con éxito.")
-                    time.sleep(1); st.rerun()
-                except Exception as e:
-                    st.error(f"Error: {e}")
+        if st.form_submit_button("REGISTRAR MOVIMIENTO"):
+            conn = get_connection(); c = conn.cursor()
+            c.execute("INSERT INTO movimientos (usuario_id, fecha, descrip, monto, tipo, cat, vence) VALUES (%s,%s,%s,%s,%s,%s,%s)", 
+                      (st.session_state.uid, datetime.now().date(), f"{cat_seleccionada}: {detalle}", monto, tipo, cat_seleccionada, fecha_pago))
+            conn.commit(); c.close(); st.success("✅ Guardado."); time.sleep(1); st.rerun()
 
-# --- 7. DASHBOARD ---
+# --- 7. MÓDULO: HISTORIAL Y BORRADO (LO NUEVO) ---
+elif menu == "📜 Historial / Borrar":
+    st.header("Control de Registros")
+    st.info("Aquí puedes eliminar movimientos duplicados o erróneos.")
+    
+    df_h = pd.read_sql(f"SELECT id, fecha, cat, monto, tipo, vence FROM movimientos WHERE usuario_id={st.session_state.uid} ORDER BY id DESC", get_connection())
+    
+    if not df_h.empty:
+        for idx, row in df_h.iterrows():
+            with st.container():
+                c1, c2, c3, c4 = st.columns([1, 3, 2, 1])
+                color = "🟢" if row['tipo'] == "Ingreso" else "🔴"
+                c1.write(f"{color}")
+                c2.write(f"**{row['cat']}** \n_{row['vence']}_")
+                c3.write(f"₡{row['monto']:,.0f}")
+                if c4.button("🗑️", key=f"del_mov_{row['id']}"):
+                    conn = get_connection(); c = conn.cursor()
+                    c.execute(f"DELETE FROM movimientos WHERE id={row['id']}")
+                    conn.commit(); c.close(); st.warning("Movimiento eliminado."); time.sleep(0.5); st.rerun()
+                st.divider()
+    else: st.info("No hay movimientos para mostrar.")
+
+# --- 8. DASHBOARD ---
 elif menu == "📊 Dashboard":
-    st.header("Estado Financiero")
+    st.header("Situación Financiera")
     df = pd.read_sql(f"SELECT * FROM movimientos WHERE usuario_id={st.session_state.uid}", get_connection())
     if not df.empty:
-        i = float(df[df['tipo']=='Ingreso']['monto'].sum())
-        g = float(df[df['tipo']=='Gasto']['monto'].sum())
-        c1, c2, c3 = st.columns(3)
-        c1.metric("INGRESOS", f"₡{i:,.0f}"); c2.metric("GASTOS", f"₡{g:,.0f}", delta_color="inverse"); c3.metric("SALDO", f"₡{(i-g):,.0f}")
+        ing = float(df[df['tipo']=='Ingreso']['monto'].sum()); gas = float(df[df['tipo']=='Gasto']['monto'].sum())
+        col1, col2, col3 = st.columns(3)
+        col1.metric("INGRESOS", f"₡{ing:,.0f}"); col2.metric("GASTOS", f"₡{gas:,.0f}", delta_color="inverse"); col3.metric("SALDO", f"₡{(ing-gas):,.0f}")
         st.plotly_chart(px.pie(df[df['tipo']=='Gasto'], values='monto', names='cat', hole=0.6, template="plotly_dark"), use_container_width=True)
     else: st.info("Sin datos.")
 
-# --- 8. METAS ---
+# --- 9. METAS ---
 elif menu == "🎯 Metas":
-    st.header("Objetivos de Ahorro")
+    st.header("Metas de Ahorro")
     with st.form("f_meta"):
-        n = st.text_input("Nombre de la Meta"); o = st.number_input("Monto Objetivo", min_value=0.0)
-        if st.form_submit_button("CREAR META"):
+        n = st.text_input("Meta"); o = st.number_input("Objetivo", min_value=0.0)
+        if st.form_submit_button("AÑADIR"):
             conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO metas (usuario_id, nombre, objetivo) VALUES (%s,%s,%s)", (st.session_state.uid, n, o)); conn.commit(); c.close(); st.rerun()
-    st.table(pd.read_sql(f"SELECT nombre, objetivo FROM metas WHERE usuario_id={st.session_state.uid}", get_connection()))
+    df_m = pd.read_sql(f"SELECT id, nombre, objetivo FROM metas WHERE usuario_id={st.session_state.uid}", get_connection())
+    for _, r in df_m.iterrows():
+        col_m1, col_m2 = st.columns([4, 1])
+        col_m1.write(f"🎯 **{r['nombre']}**: ₡{r['objetivo']:,.0f}")
+        if col_m2.button("🗑️", key=f"del_meta_{r['id']}"):
+            conn = get_connection(); c = conn.cursor(); c.execute(f"DELETE FROM metas WHERE id={r['id']}"); conn.commit(); c.close(); st.rerun()
 
-# --- 9. DEUDAS ---
+# --- 10. DEUDAS ---
 elif menu == "🏦 Deudas":
-    st.header("Control de Préstamos")
+    st.header("Control de Deudas")
     with st.form("f_deuda"):
-        n = st.text_input("Acreedor"); o = st.number_input("Deuda Total", min_value=0.0)
-        if st.form_submit_button("REGISTRAR DEUDA"):
+        n = st.text_input("Acreedor"); o = st.number_input("Monto", min_value=0.0)
+        if st.form_submit_button("REGISTRAR"):
             conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO deudas (usuario_id, nombre, monto_total) VALUES (%s,%s,%s)", (st.session_state.uid, n, o)); conn.commit(); c.close(); st.rerun()
-    st.table(pd.read_sql(f"SELECT nombre, monto_total FROM deudas WHERE usuario_id={st.session_state.uid}", get_connection()))
+    df_d = pd.read_sql(f"SELECT id, nombre, monto_total FROM deudas WHERE usuario_id={st.session_state.uid}", get_connection())
+    for _, r in df_d.iterrows():
+        col_d1, col_d2 = st.columns([4, 1])
+        col_d1.write(f"🏦 **{r['nombre']}**: ₡{r['monto_total']:,.0f}")
+        if col_d2.button("🗑️", key=f"del_deuda_{r['id']}"):
+            conn = get_connection(); c = conn.cursor(); c.execute(f"DELETE FROM deudas WHERE id={r['id']}"); conn.commit(); c.close(); st.rerun()
 
-# --- 10. SINPE RÁPIDO ---
-elif menu == "📱 SINPE Rápido":
-    st.header("Atajo SINPE Móvil")
-    st.text_input("Teléfono"); st.number_input("Monto")
-    st.markdown('<a href="https://www.google.com" target="_blank" class="bank-btn">🚀 ABRIR APP BANCO</a>', unsafe_allow_html=True)
-
-# --- 11. CONVERSOR ---
-elif menu == "💱 Conversor":
-    st.header("Calculadora de Divisas")
-    m = st.number_input("Monto Colones:", min_value=0.0)
-    st.metric("Dólares ($)", f"${(m/515):,.2f}")
-
-# --- 12. ADMIN ---
+# --- 11. ADMIN ---
 elif menu == "⚙️ Admin" and st.session_state.rol == 'admin':
-    st.header("Gestión de Clientes")
+    st.header("Panel Maestro")
     with st.form("f_admin"):
-        un = st.text_input("User"); uk = st.text_input("Pass"); up = st.selectbox("Plan", ["Mensual", "Anual"]); um = st.text_input("Precio", "5000")
+        un = st.text_input("Usuario"); uk = st.text_input("Clave"); up = st.selectbox("Plan", ["Mensual", "Anual"]); um = st.text_input("Monto", "5000")
         if st.form_submit_button("ACTIVAR"):
             vf = (datetime.now() + timedelta(days=30 if up=="Mensual" else 365)).date()
             conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO usuarios (nombre, clave, expira, rol, plan, precio) VALUES (%s,%s,%s,%s,%s,%s)", (un, uk, vf, 'usuario', up, um)); conn.commit(); c.close(); st.rerun()
@@ -201,7 +198,7 @@ elif menu == "⚙️ Admin" and st.session_state.rol == 'admin':
     for _, r in u_list.iterrows():
         with st.container():
             st.markdown(f'<div class="user-card"><strong>{r["nombre"]}</strong> | Plan: {r["plan"]}</div>', unsafe_allow_html=True)
-            pdf = generar_pdf_venda(r['nombre'], r['plan'], r['precio'], str(r['expira']))
+            pdf = generar_pdf(r['nombre'], r['plan'], r['precio'], str(r['expira']))
             st.download_button(f"📄 Recibo {r['nombre']}", pdf, f"Recibo_{r['nombre']}.pdf", key=f"p_{r['id']}")
-            if st.button(f"🗑️ Eliminar {r['nombre']}", key=f"d_{r['id']}"):
+            if st.button(f"🗑️ Eliminar Acceso", key=f"d_u_{r['id']}"):
                 conn = get_connection(); c = conn.cursor(); c.execute(f"DELETE FROM usuarios WHERE id={r['id']}"); conn.commit(); c.close(); st.rerun()
