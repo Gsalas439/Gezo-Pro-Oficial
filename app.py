@@ -33,7 +33,6 @@ def get_connection():
 
 def inicializar_db():
     conn = get_connection(); c = conn.cursor()
-    # Todas las tablas necesarias para todos los módulos
     c.execute("CREATE TABLE IF NOT EXISTS usuarios (id SERIAL PRIMARY KEY, nombre TEXT UNIQUE, clave TEXT, expira DATE, rol TEXT, plan TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS movimientos (id SERIAL PRIMARY KEY, usuario_id INTEGER, fecha DATE, descrip TEXT, monto DECIMAL, tipo TEXT, cat TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS metas (id SERIAL PRIMARY KEY, usuario_id INTEGER, nombre TEXT, objetivo DECIMAL, actual DECIMAL DEFAULT 0)")
@@ -45,10 +44,8 @@ def inicializar_db():
     c.execute("CREATE TABLE IF NOT EXISTS billeteras (id SERIAL PRIMARY KEY, usuario_id INTEGER, nombre TEXT, tipo TEXT, moneda TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS proyectos (id SERIAL PRIMARY KEY, usuario_id INTEGER, nombre TEXT)")
     
-    # Inyección de columnas seguras (si no existen)
     cols_mov = ["moneda TEXT DEFAULT 'CRC'", "comprobante TEXT DEFAULT NULL", "billetera_id INTEGER DEFAULT 0", "proyecto_id INTEGER DEFAULT 0", "impuesto_reserva DECIMAL DEFAULT 0"]
     for col in cols_mov: c.execute(f"ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS {col}")
-    
     cols_deu = ["moneda TEXT DEFAULT 'CRC'", "tasa_interes DECIMAL DEFAULT 0", "plazo_meses INTEGER DEFAULT 1"]
     for col in cols_deu: c.execute(f"ALTER TABLE deudas ADD COLUMN IF NOT EXISTS {col}")
     
@@ -118,21 +115,23 @@ if not st.session_state.autenticado:
                 else: st.error("Credenciales incorrectas.")
     st.stop()
 
+# Auto-cobro al iniciar sesión
 procesar_suscripciones_pendientes()
 
-# --- 4. NAVEGACIÓN COMPLETA ---
+# --- 4. NAVEGACIÓN COMPLETA ERP ---
 st.markdown(f"### 👑 **{st.session_state.uname}** | ERP System")
 
 # Alertas Proactivas
 conn = get_connection()
 df_alertas = pd.read_sql(f"SELECT nombre, fecha_vence, monto_total, pagado, moneda FROM deudas WHERE usuario_id={st.session_state.uid} AND tipo_registro='DEUDA' AND pagado < monto_total", conn)
 conn.close()
-for _, r in df_alertas.iterrows():
-    dias = (r['fecha_vence'] - date.today()).days
-    if 0 <= dias <= 2: st.markdown(f'<div class="alert-box">⚠️ ALERTA: Tu obligación con **{r["nombre"]}** vence en {dias} días.</div>', unsafe_allow_html=True)
-    elif dias < 0: st.markdown(f'<div class="alert-box" style="background: rgba(200,0,0,0.2);">🚨 VENCIDA: Atraso de {abs(dias)} días con **{r["nombre"]}**.</div>', unsafe_allow_html=True)
+if not df_alertas.empty:
+    for _, r in df_alertas.iterrows():
+        dias = (r['fecha_vence'] - date.today()).days
+        if 0 <= dias <= 2: st.markdown(f'<div class="alert-box">⚠️ ALERTA: Tu obligación con **{r["nombre"]}** vence en {dias} días.</div>', unsafe_allow_html=True)
+        elif dias < 0: st.markdown(f'<div class="alert-box" style="background: rgba(200,0,0,0.2);">🚨 VENCIDA: Atraso de {abs(dias)} días con **{r["nombre"]}**.</div>', unsafe_allow_html=True)
 
-t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(["📊 DASHBOARD", "💸 REGISTRO", "💼 BILLETERAS & PROYECTOS", "🚧 FIJOS & PRESUPUESTOS", "🎯 METAS", "🏦 DEUDAS", "📱 SINPE", "📜 HISTORIAL"])
+t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(["📊 DASHBOARD", "💸 REGISTRO", "💼 BILLETERAS & PROYECTOS", "🚧 FIJOS & PRESUPUESTOS", "🎯 METAS", "🏦 DEUDAS", "📱 SINPE", "📜 HISTORIAL Y AJUSTES"])
 
 # --- T1: DASHBOARD & RENTABILIDAD ---
 with t1:
@@ -156,7 +155,9 @@ with t1:
 
     if not df.empty:
         df['monto_crc'] = df.apply(cvt, axis=1)
-        impuestos_reserva = df['impuesto_reserva'].sum() if 'impuesto_reserva' in df.columns else 0
+        # Protegemos contra NaN si hay datos muy viejos
+        df['impuesto_reserva'] = df['impuesto_reserva'].fillna(0)
+        impuestos_reserva = df['impuesto_reserva'].sum()
         
         ing = df[df['tipo']=='Ingreso']['monto_crc'].sum()
         gas = df[df['tipo']=='Gasto']['monto_crc'].sum()
@@ -175,7 +176,9 @@ with t1:
             st.markdown("### 🚧 Semáforo de Presupuestos (Este Mes)")
             gastos_mes = df[df['tipo']=='Gasto'].groupby('cat')['monto_crc'].sum().reset_index()
             for _, rp in df_pres.iterrows():
-                gastado = gastos_mes[gastos_mes['cat'] == rp['cat']]['monto_crc'].sum() if rp['cat'] in gastos_mes['cat'].values else 0
+                # Busca el gasto, si no existe devuelve 0
+                gasto_serie = gastos_mes[gastos_mes['cat'] == rp['cat']]['monto_crc']
+                gastado = gasto_serie.sum() if not gasto_serie.empty else 0
                 limite = float(rp['limite'])
                 pct = min(gastado / limite, 1.0) if limite > 0 else 1.0
                 st.write(f"**{rp['cat']}** | Gastado: ₡{gastado:,.0f} / ₡{limite:,.0f}")
@@ -192,6 +195,8 @@ with t1:
                 margen = ing_p - gas_p
                 color_m = "#2ecc71" if margen >= 0 else "#ff4b4b"
                 st.markdown(f'<div class="user-card"><b>{rp["nombre"]}</b> | Ingresos: ₡{ing_p:,.0f} | Gastos: ₡{gas_p:,.0f} | <span style="color:{color_m};">Margen: ₡{margen:,.0f}</span></div>', unsafe_allow_html=True)
+    else:
+        st.info("No hay transacciones en este periodo.")
 
 # --- T2: REGISTRO MÁGICO Y MANUAL ---
 with t2:
@@ -340,7 +345,7 @@ with t6:
         for _, r in df_d.iterrows():
             pend = float(r['monto_total']) - float(r['pagado'])
             cuota = calcular_cuota_nivelada(float(r['monto_total']), float(r['tasa_interes']), int(r['plazo_meses']))
-            st.markdown(f'<div class="user-card">🏦 <b>{r["nombre"]}</b> | Saldo: {r["moneda"]} {pend:,.0f}<br>Tasa: {r["tasa_interes"]}% | Cuota Sugerida: <b>{r["moneda"]} {cuota:,.0f}</b></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="user-card">🏦 <b>{r["nombre"]}</b> | Saldo: {r["moneda"]} {pend:,.0f}<br>Tasa: {r["tasa_interes"]}% | Cuota Mensual Sugerida: <b>{r["moneda"]} {cuota:,.0f}</b></div>', unsafe_allow_html=True)
             if pend > 0:
                 c1, c2, c3 = st.columns([2,1,1]); m_p = c1.number_input("Abono", min_value=0.0, value=min(cuota, pend), key=f"p_{r['id']}")
                 if c2.button("ABONAR", key=f"b_{r['id']}", use_container_width=True):
@@ -367,7 +372,7 @@ with t6:
                     conn = get_connection(); c = conn.cursor(); c.execute("DELETE FROM deudas WHERE id=%s", (r['id'],)); conn.commit(); c.close(); conn.close(); st.rerun()
 
 # --- T7: SINPE MÓVIL Y AGENDA ---
-with t6:
+with t7:
     conn = get_connection(); df_cnt = pd.read_sql(f"SELECT * FROM contactos WHERE usuario_id={st.session_state.uid} ORDER BY nombre", conn); conn.close()
     col_s1, col_s2 = st.columns([1.2, 1])
     with col_s1:
@@ -383,6 +388,8 @@ with t6:
                     n_dest = "Manual" if es_manual else sel.split(" - ")[0]
                     reg_mov(monto_s, "Gasto", "📱 SINPE", f"A: {n_dest} ({num_final}) - {det_s}", "CRC")
                     st.markdown('<a href="https://www.google.com" target="_blank" class="btn-banco">🏦 IR AL BANCO AHORA</a>', unsafe_allow_html=True)
+                else: st.error("Ingresa número y monto.")
+
     with col_s2:
         st.markdown("**2. Agenda**")
         with st.expander("➕ Nuevo contacto"):
@@ -399,26 +406,31 @@ with t6:
                     conn = get_connection(); c = conn.cursor(); c.execute("DELETE FROM contactos WHERE id=%s", (r['id'],)); conn.commit(); c.close(); conn.close(); st.rerun()
 
 # --- T8: HISTORIAL Y AJUSTES ---
-with t7:
+with t8:
     st.subheader("📜 Libro Mayor Contable y Ajustes")
     conn = get_connection()
-    df_h = pd.read_sql(f"SELECT id, fecha as Fecha, tipo as Tipo, cat as Categoría, monto as Monto, moneda as Divisa, descrip as Detalle, impuesto_reserva as Retenido, comprobante FROM movimientos WHERE usuario_id={st.session_state.uid} ORDER BY id DESC LIMIT 100", conn)
+    df_h = pd.read_sql(f"SELECT id, fecha, tipo, cat, monto, moneda, descrip, impuesto_reserva, comprobante FROM movimientos WHERE usuario_id={st.session_state.uid} ORDER BY id DESC LIMIT 100", conn)
     conn.close()
     
     if not df_h.empty:
-        df_csv = df_h.drop(columns=['comprobante'])
+        # Exportar CSV de forma limpia
+        df_csv = df_h.drop(columns=['comprobante']).rename(columns={'fecha':'Fecha', 'tipo':'Tipo', 'cat':'Categoría', 'monto':'Monto', 'moneda':'Divisa', 'descrip':'Detalle', 'impuesto_reserva':'Retenido'})
         csv = df_csv.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Descargar Libro Mayor (Excel/CSV)", data=csv, file_name=f'GeZo_Auditoria_{date.today()}.csv', mime='text/csv')
         st.divider()
         
+        # Historial Interactivo y Bóveda de Recibos (Totalmente en Minúsculas)
         for _, r in df_h.head(30).iterrows():
-            with st.expander(f"{r['Fecha']} | {r['Tipo']} | {r['Divisa']} {float(r['Monto']):,.0f} | {r['Categoría']}"):
-                st.write(f"**Detalle:** {r['Detalle']}")
-                if r['Retenido'] and float(r['Retenido']) > 0: st.write(f"**Impuesto Retenido:** ₡{float(r['Retenido']):,.0f}")
-                if r['comprobante']: st.image(base64.b64decode(r['comprobante']), caption="Recibo Adjunto", use_container_width=True)
+            with st.expander(f"{r['fecha']} | {r['tipo']} | {r['moneda']} {float(r['monto']):,.0f} | {r['cat']}"):
+                st.write(f"**Detalle:** {r['descrip']}")
+                if pd.notnull(r['impuesto_reserva']) and float(r['impuesto_reserva']) > 0: 
+                    st.write(f"**Impuesto Retenido:** ₡{float(r['impuesto_reserva']):,.0f}")
+                if r['comprobante']: 
+                    st.image(base64.b64decode(r['comprobante']), caption="Recibo Adjunto", use_container_width=True)
                 if st.button("🗑️ Borrar registro", key=f"delh_{r['id']}"):
                     conn = get_connection(); c = conn.cursor(); c.execute("DELETE FROM movimientos WHERE id=%s", (r['id'],)); conn.commit(); c.close(); conn.close(); st.rerun()
-    else: st.info("Sin registros.")
+    else: 
+        st.info("Sin registros.")
     
     st.divider()
     st.markdown("### Configuración de Seguridad")
