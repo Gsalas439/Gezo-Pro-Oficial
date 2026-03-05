@@ -25,7 +25,6 @@ st.markdown("""
     }
     .stButton>button:hover { transform: translateY(-3px); box-shadow: 0px 10px 30px #00c6ff; color: #fff !important; }
     .user-card { background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 15px; border: 1px solid #333; margin-bottom: 15px; border-left: 5px solid #00f2fe; }
-    .delete-btn { color: #ff4b4b !important; border: 1px solid #ff4b4b !important; background: transparent !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -42,10 +41,9 @@ def inicializar_db():
     c.execute("CREATE TABLE IF NOT EXISTS usuarios (id SERIAL PRIMARY KEY, nombre TEXT UNIQUE, clave TEXT, expira DATE, rol TEXT, plan TEXT, precio TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS movimientos (id SERIAL PRIMARY KEY, usuario_id INTEGER, fecha DATE, descrip TEXT, monto DECIMAL, tipo TEXT, cat TEXT, vence DATE)")
     c.execute("CREATE TABLE IF NOT EXISTS metas (id SERIAL PRIMARY KEY, usuario_id INTEGER, nombre TEXT, objetivo DECIMAL, actual DECIMAL DEFAULT 0)")
-    c.execute("CREATE TABLE IF NOT EXISTS deudas (id SERIAL PRIMARY KEY, usuario_id INTEGER, nombre TEXT, monto_total DECIMAL, pagado DECIMAL DEFAULT 0)")
+    c.execute("CREATE TABLE IF NOT EXISTS deudas (id SERIAL PRIMARY KEY, usuario_id INTEGER, nombre TEXT, monto_total DECIMAL, tipo_registro TEXT DEFAULT 'DEUDA')")
     try:
-        c.execute("ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS vence DATE")
-        c.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS precio TEXT")
+        c.execute("ALTER TABLE deudas ADD COLUMN IF NOT EXISTS tipo_registro TEXT DEFAULT 'DEUDA'")
     except: conn.rollback()
     c.execute("SELECT * FROM usuarios WHERE nombre='admin'")
     if not c.fetchone():
@@ -92,19 +90,15 @@ if not st.session_state.autenticado:
 # --- 5. MENÚ ---
 with st.sidebar:
     st.markdown(f"### Bienvenido, {st.session_state.uname} 👑")
-    menu = st.radio("NAVEGACIÓN", ["📊 Dashboard", "💸 Nuevo Registro", "📜 Historial / Borrar", "🎯 Metas", "🏦 Deudas", "⚙️ Admin"])
+    menu = st.radio("NAVEGACIÓN", ["📊 Dashboard", "💸 Nuevo Registro", "📜 Historial / Borrar", "🎯 Metas", "🏦 Deudas y Cobros", "⚙️ Admin"])
     if st.button("CERRAR SESIÓN"): st.session_state.autenticado = False; st.rerun()
 
-# --- 6. MÓDULO: NUEVO REGISTRO (CON SEPARACIÓN TOTAL) ---
+# --- 6. MÓDULO: NUEVO REGISTRO ---
 if menu == "💸 Nuevo Registro":
     st.header("Entradas y Salidas de Capital")
-    
     lista_g = ["⚖️ Pensión Alimentaria", "⚡ Recibo de Luz", "💧 Recibo de Agua", "🏠 Alquiler/Hipoteca", "🛒 Súper/Comida", "📱 Plan Celular/Net", "🏦 Cuota Préstamo", "🚗 Gasolina/Transporte", "📦 Otros Gastos"]
     lista_i = ["💵 Salario Mensual", "💰 Aguinaldo", "📱 SINPE Recibido", "📈 Ventas/Negocio", "🧧 Comisiones", "🚜 Freelance/Servicios", "🏢 Rentas/Alquileres", "🎁 Regalos", "💸 Cobros", "📦 Otros Ingresos"]
-    
     tipo = st.radio("Seleccione el Tipo:", ["Gasto", "Ingreso"], horizontal=True, key="tipo_reg")
-    
-    # El selectbox cambia según el radio ANTES de entrar al form
     if tipo == "Ingreso":
         cat_seleccionada = st.selectbox("Categoría de Ingreso:", lista_i, key="cat_i")
     else:
@@ -117,34 +111,26 @@ if menu == "💸 Nuevo Registro":
             fecha_pago = st.date_input("Fecha Correspondiente:", datetime.now())
         with col2:
             detalle = st.text_input("Nota / Comentario:")
-        
         if st.form_submit_button("REGISTRAR MOVIMIENTO"):
             conn = get_connection(); c = conn.cursor()
             c.execute("INSERT INTO movimientos (usuario_id, fecha, descrip, monto, tipo, cat, vence) VALUES (%s,%s,%s,%s,%s,%s,%s)", 
                       (st.session_state.uid, datetime.now().date(), f"{cat_seleccionada}: {detalle}", monto, tipo, cat_seleccionada, fecha_pago))
             conn.commit(); c.close(); st.success("✅ Guardado."); time.sleep(1); st.rerun()
 
-# --- 7. MÓDULO: HISTORIAL Y BORRADO (LO NUEVO) ---
+# --- 7. MÓDULO: HISTORIAL Y BORRADO ---
 elif menu == "📜 Historial / Borrar":
     st.header("Control de Registros")
-    st.info("Aquí puedes eliminar movimientos duplicados o erróneos.")
-    
     df_h = pd.read_sql(f"SELECT id, fecha, cat, monto, tipo, vence FROM movimientos WHERE usuario_id={st.session_state.uid} ORDER BY id DESC", get_connection())
-    
     if not df_h.empty:
         for idx, row in df_h.iterrows():
             with st.container():
                 c1, c2, c3, c4 = st.columns([1, 3, 2, 1])
-                color = "🟢" if row['tipo'] == "Ingreso" else "🔴"
-                c1.write(f"{color}")
+                c1.write("🟢" if row['tipo'] == "Ingreso" else "🔴")
                 c2.write(f"**{row['cat']}** \n_{row['vence']}_")
                 c3.write(f"₡{row['monto']:,.0f}")
                 if c4.button("🗑️", key=f"del_mov_{row['id']}"):
-                    conn = get_connection(); c = conn.cursor()
-                    c.execute(f"DELETE FROM movimientos WHERE id={row['id']}")
-                    conn.commit(); c.close(); st.warning("Movimiento eliminado."); time.sleep(0.5); st.rerun()
+                    conn = get_connection(); c = conn.cursor(); c.execute(f"DELETE FROM movimientos WHERE id={row['id']}"); conn.commit(); c.close(); st.rerun()
                 st.divider()
-    else: st.info("No hay movimientos para mostrar.")
 
 # --- 8. DASHBOARD ---
 elif menu == "📊 Dashboard":
@@ -155,7 +141,6 @@ elif menu == "📊 Dashboard":
         col1, col2, col3 = st.columns(3)
         col1.metric("INGRESOS", f"₡{ing:,.0f}"); col2.metric("GASTOS", f"₡{gas:,.0f}", delta_color="inverse"); col3.metric("SALDO", f"₡{(ing-gas):,.0f}")
         st.plotly_chart(px.pie(df[df['tipo']=='Gasto'], values='monto', names='cat', hole=0.6, template="plotly_dark"), use_container_width=True)
-    else: st.info("Sin datos.")
 
 # --- 9. METAS ---
 elif menu == "🎯 Metas":
@@ -166,24 +151,39 @@ elif menu == "🎯 Metas":
             conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO metas (usuario_id, nombre, objetivo) VALUES (%s,%s,%s)", (st.session_state.uid, n, o)); conn.commit(); c.close(); st.rerun()
     df_m = pd.read_sql(f"SELECT id, nombre, objetivo FROM metas WHERE usuario_id={st.session_state.uid}", get_connection())
     for _, r in df_m.iterrows():
-        col_m1, col_m2 = st.columns([4, 1])
-        col_m1.write(f"🎯 **{r['nombre']}**: ₡{r['objetivo']:,.0f}")
-        if col_m2.button("🗑️", key=f"del_meta_{r['id']}"):
+        c_m1, c_m2 = st.columns([4, 1])
+        c_m1.write(f"🎯 **{r['nombre']}**: ₡{r['objetivo']:,.0f}")
+        if c_m2.button("🗑️", key=f"del_meta_{r['id']}"):
             conn = get_connection(); c = conn.cursor(); c.execute(f"DELETE FROM metas WHERE id={r['id']}"); conn.commit(); c.close(); st.rerun()
 
-# --- 10. DEUDAS ---
-elif menu == "🏦 Deudas":
-    st.header("Control de Deudas")
-    with st.form("f_deuda"):
-        n = st.text_input("Acreedor"); o = st.number_input("Monto", min_value=0.0)
-        if st.form_submit_button("REGISTRAR"):
-            conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO deudas (usuario_id, nombre, monto_total) VALUES (%s,%s,%s)", (st.session_state.uid, n, o)); conn.commit(); c.close(); st.rerun()
-    df_d = pd.read_sql(f"SELECT id, nombre, monto_total FROM deudas WHERE usuario_id={st.session_state.uid}", get_connection())
-    for _, r in df_d.iterrows():
-        col_d1, col_d2 = st.columns([4, 1])
-        col_d1.write(f"🏦 **{r['nombre']}**: ₡{r['monto_total']:,.0f}")
-        if col_d2.button("🗑️", key=f"del_deuda_{r['id']}"):
-            conn = get_connection(); c = conn.cursor(); c.execute(f"DELETE FROM deudas WHERE id={r['id']}"); conn.commit(); c.close(); st.rerun()
+# --- 10. MÓDULO: DEUDAS Y COBROS (ACTUALIZADO) ---
+elif menu == "🏦 Deudas y Cobros":
+    st.header("Control de Pasivos y Activos")
+    t1, t2 = st.tabs(["💸 Mis Deudas (Lo que debo)", "💰 Mis Cobros (Lo que me deben)"])
+    
+    with t1:
+        with st.form("f_deuda"):
+            n = st.text_input("¿A quién le debo?"); o = st.number_input("Monto de la deuda", min_value=0.0)
+            if st.form_submit_button("REGISTRAR DEUDA"):
+                conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO deudas (usuario_id, nombre, monto_total, tipo_registro) VALUES (%s,%s,%s,%s)", (st.session_state.uid, n, o, 'DEUDA')); conn.commit(); c.close(); st.rerun()
+        df_d = pd.read_sql(f"SELECT id, nombre, monto_total FROM deudas WHERE usuario_id={st.session_state.uid} AND tipo_registro='DEUDA'", get_connection())
+        for _, r in df_d.iterrows():
+            cd1, cd2 = st.columns([4, 1])
+            cd1.write(f"🔴 **{r['nombre']}**: ₡{r['monto_total']:,.0f}")
+            if cd2.button("🗑️", key=f"del_d_{r['id']}"):
+                conn = get_connection(); c = conn.cursor(); c.execute(f"DELETE FROM deudas WHERE id={r['id']}"); conn.commit(); c.close(); st.rerun()
+
+    with t2:
+        with st.form("f_cobro"):
+            n = st.text_input("¿Quién me debe?"); o = st.number_input("Monto a cobrar", min_value=0.0)
+            if st.form_submit_button("REGISTRAR COBRO"):
+                conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO deudas (usuario_id, nombre, monto_total, tipo_registro) VALUES (%s,%s,%s,%s)", (st.session_state.uid, n, o, 'COBRO')); conn.commit(); c.close(); st.rerun()
+        df_c = pd.read_sql(f"SELECT id, nombre, monto_total FROM deudas WHERE usuario_id={st.session_state.uid} AND tipo_registro='COBRO'", get_connection())
+        for _, r in df_c.iterrows():
+            cc1, cc2 = st.columns([4, 1])
+            cc1.write(f"🟢 **{r['nombre']}**: ₡{r['monto_total']:,.0f}")
+            if cc2.button("🗑️", key=f"del_c_{r['id']}"):
+                conn = get_connection(); c = conn.cursor(); c.execute(f"DELETE FROM deudas WHERE id={r['id']}"); conn.commit(); c.close(); st.rerun()
 
 # --- 11. ADMIN ---
 elif menu == "⚙️ Admin" and st.session_state.rol == 'admin':
@@ -193,7 +193,6 @@ elif menu == "⚙️ Admin" and st.session_state.rol == 'admin':
         if st.form_submit_button("ACTIVAR"):
             vf = (datetime.now() + timedelta(days=30 if up=="Mensual" else 365)).date()
             conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO usuarios (nombre, clave, expira, rol, plan, precio) VALUES (%s,%s,%s,%s,%s,%s)", (un, uk, vf, 'usuario', up, um)); conn.commit(); c.close(); st.rerun()
-    
     u_list = pd.read_sql("SELECT * FROM usuarios WHERE rol!='admin'", get_connection())
     for _, r in u_list.iterrows():
         with st.container():
