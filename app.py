@@ -7,24 +7,36 @@ from fpdf import FPDF
 import io
 import time
 
-# --- 1. ESTÉTICA ELITE PRO ---
+# --- 1. ESTÉTICA ELITE PRO + LIMPIEZA DE INTERFAZ ---
 st.set_page_config(page_title="GeZo Elite Pro", page_icon="💎", layout="wide")
 
 st.markdown("""
     <style>
+    /* Ocultar elementos innecesarios de Streamlit */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stDeployButton {display:none;}
+    [data-testid="stToolbar"] {display: none !important;}
+    
+    /* Fondo y Colores */
     .main { background-color: #0b0e14; color: #e0e0e0; }
     [data-testid="stSidebar"] { background-color: #0f121a; border-right: 1px solid #1e2633; }
+    
+    /* Métricas y Tarjetas */
     div[data-testid="stMetric"] {
         background: rgba(0, 198, 255, 0.08); border-radius: 20px; padding: 25px; 
         border: 1px solid #00c6ff; box-shadow: 0px 8px 25px rgba(0, 198, 255, 0.15); border-left: 10px solid #00c6ff;
     }
+    .user-card { background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 15px; border: 1px solid #333; margin-bottom: 15px; border-left: 5px solid #00f2fe; }
+    .alert-box { padding: 15px; background: rgba(255, 165, 0, 0.1); border: 1px solid orange; border-radius: 10px; color: orange; margin-bottom: 20px; }
+    
+    /* Botones */
     .stButton>button {
         border-radius: 12px; background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
         color: #000 !important; font-weight: 800; width: 100%; border: none; height: 3em;
         transition: 0.3s all; text-transform: uppercase;
     }
-    .user-card { background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 15px; border: 1px solid #333; margin-bottom: 15px; border-left: 5px solid #00f2fe; }
-    .alert-box { padding: 15px; background: rgba(255, 165, 0, 0.1); border: 1px solid orange; border-radius: 10px; color: orange; margin-bottom: 20px; }
     .bank-btn { 
         background: #1a1d24; border: 2px solid #00c6ff; color: #00c6ff !important; 
         padding: 15px; border-radius: 12px; text-align: center; display: block; 
@@ -173,10 +185,10 @@ elif menu == "📱 SINPE Rápido":
                 conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO contactos (usuario_id, nombre, telefono) VALUES (%s,%s,%s)", (st.session_state.uid, n, t)); conn.commit(); c.close(); st.rerun()
     sel = st.selectbox("Contacto:", ["Manual"] + [f"{r['nombre']} ({r['telefono']})" for _, r in df_cont.iterrows()])
     num = st.text_input("Número:") if sel == "Manual" else sel.split("(")[1].replace(")", "")
-    st.markdown(f'<a href="https://www.google.com" target="_blank" class="bank-btn">🏦 ABRIR APP BANCARIA PARA: {num}</a>', unsafe_allow_html=True)
+    st.markdown(f'<a href="https://www.google.com" target="_blank" class="bank-btn">🏦 IR AL BANCO PARA: {num}</a>', unsafe_allow_html=True)
 
 elif menu == "📜 Historial / Borrar":
-    st.header("Historial y Eliminación")
+    st.header("Historial")
     df_h = pd.read_sql(f"SELECT id, fecha, cat, monto, tipo FROM movimientos WHERE usuario_id={st.session_state.uid} ORDER BY id DESC", get_connection())
     for _, row in df_h.iterrows():
         c1, c2, c3, c4 = st.columns([1,3,2,1])
@@ -187,11 +199,9 @@ elif menu == "📜 Historial / Borrar":
             conn = get_connection(); c = conn.cursor(); c.execute(f"DELETE FROM movimientos WHERE id={row['id']}"); conn.commit(); c.close(); st.rerun()
 
 elif menu == "⚙️ Admin" and st.session_state.rol == 'admin':
-    st.header("Control de Usuarios")
+    st.header("Panel Maestro")
     with st.form("f_adm"):
         un = st.text_input("Usuario"); uk = st.text_input("Clave"); up = st.selectbox("Plan", ["Mensual", "Anual"]); um = st.text_input("Monto", "5000")
         if st.form_submit_button("CREAR"):
             vf = (datetime.now() + timedelta(days=30 if up=="Mensual" else 365)).date()
             conn = get_connection(); c = conn.cursor(); c.execute("INSERT INTO usuarios (nombre, clave, expira, rol, plan, precio) VALUES (%s,%s,%s,%s,%s,%s)", (un, uk, vf, 'usuario', up, um)); conn.commit(); c.close(); st.rerun()
-    u_list = pd.read_sql("SELECT * FROM usuarios WHERE rol!='admin'", get_connection())
-    st.dataframe(u_list[['nombre', 'plan', 'expira']])
