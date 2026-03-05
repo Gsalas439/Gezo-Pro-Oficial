@@ -127,11 +127,35 @@ if menu == "📊 Dashboard IA":
 elif menu == "💸 Registrar Cuentas":
     st.header("Gestión de Entradas y Salidas")
     
-    # Categorías de Egresos
-    categorias_gastos = ["⚖️ Pensión Alimentaria", "⚡ Recibo de Luz", "💧 Recibo de Agua", "🏠 Alquiler/Hipoteca", "🛒 Súper/Comida", "📱 Plan Celular/Internet", "🏦 Préstamo Bancario", "🚗 Combustible/Transporte", "🏥 Salud/Farmacia", "🎓 Educación/Escuela", "📦 Otros Gastos"]
+    # --- LISTA DE EGRESOS (GASTOS) ---
+    categorias_gastos = [
+        "⚖️ Pensión Alimentaria", 
+        "⚡ Recibo de Luz", 
+        "💧 Recibo de Agua", 
+        "🏠 Alquiler/Hipoteca", 
+        "🛒 Súper/Comida", 
+        "📱 Plan Celular/Internet", 
+        "🏦 Préstamo Bancario", 
+        "🚗 Combustible/Transporte",
+        "🏥 Salud/Farmacia",
+        "🎓 Educación/Escuela",
+        "📦 Otros Gastos"
+    ]
     
-    # Categorías de Ingresos (AMPLIADA)
-    categorias_ingresos = ["💵 Salario Mensual", "💰 Aguinaldo", "📱 SINPE Recibido", "📈 Ventas/Negocio Propio", "🧧 Comisiones/Bonos", "🚜 Ingresos por Servicios/Freelance", "🏢 Alquileres Cobrados", "🏦 Intereses/Inversiones", "🎁 Regalos/Premios", "💸 Devolución de Dinero", "📦 Otros Ingresos"]
+    # --- LISTA DE INGRESOS (AMPLIADA) ---
+    categorias_ingresos = [
+        "💵 Salario Mensual", 
+        "💰 Aguinaldo", 
+        "📱 SINPE Recibido", 
+        "📈 Ventas/Negocio Propio", 
+        "🧧 Comisiones/Bonos",
+        "🚜 Ingresos por Servicios/Freelance",
+        "🏢 Alquileres Cobrados",
+        "🏦 Intereses/Inversiones", 
+        "🎁 Regalos/Premios",
+        "💸 Devolución de Dinero",
+        "📦 Otros Ingresos"
+    ]
 
     with st.form("form_movimiento"):
         col_a, col_b = st.columns(2)
@@ -140,21 +164,28 @@ elif menu == "💸 Registrar Cuentas":
             monto_mov = st.number_input("Monto (₡)", min_value=0.0, step=5000.0)
         
         with col_b:
+            # Lógica dinámica para mostrar la lista correcta
             lista_final = categorias_ingresos if tipo_mov == "Ingreso" else categorias_gastos
             cat_mov = st.selectbox("Categoría Correspondiente:", lista_final)
+            
+            # Campo de fecha solicitado para el registro
             fecha_pago = st.date_input("Fecha del Pago Correspondiente:", datetime.now())
         
-        nota_opcional = st.text_input("Nota adicional (Opcional):", placeholder="Ej: Pago de horas extra")
+        nota_opcional = st.text_input("Nota adicional (Opcional):", placeholder="Ej: Pago de horas extra o quincena adelantada")
         
         if st.form_submit_button("REGISTRAR EN BITÁCORA"):
             try:
                 conn = get_connection(); c = conn.cursor()
-                c.execute("INSERT INTO movimientos (usuario_id, fecha, descrip, monto, tipo, cat, vence) VALUES (%s,%s,%s,%s,%s,%s,%s)", 
+                # Se guarda la fecha_pago en la columna 'vence' para que quede vinculada al movimiento
+                c.execute("""INSERT INTO movimientos (usuario_id, fecha, descrip, monto, tipo, cat, vence) 
+                          VALUES (%s, %s, %s, %s, %s, %s, %s)""", 
                           (st.session_state.uid, datetime.now().date(), f"{cat_mov}: {nota_opcional}", monto_mov, tipo_mov, cat_mov, fecha_pago))
                 conn.commit(); c.close()
-                st.success(f"✅ {tipo_mov} registrado con éxito.")
-                time.sleep(1); st.rerun()
-            except Exception as e: st.error(f"Error: {e}")
+                st.success(f"✅ {tipo_mov} de {cat_mov} registrado con éxito.")
+                time.sleep(1)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al guardar: {e}")
 
 # --- 8. MÓDULOS RESTANTES INTACTOS ---
 elif menu == "📱 SINPE Rápido":
